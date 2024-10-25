@@ -4,13 +4,12 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
 
 /**
  * @title MRTR Token
  * @dev Implementation of the MRTR token with burnable and upgradable
  */
-contract MRTRToken is Initializable, ERC20Upgradeable, ERC20BurnableUpgradeable, OwnableUpgradeable {
+contract MRTRToken is Initializable, ERC20Upgradeable, OwnableUpgradeable {
     uint256 private constant TOTAL_SUPPLY = 1_000_000_000 * 10 ** 18; // 1 billion tokens with 18 decimals
 
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -20,7 +19,6 @@ contract MRTRToken is Initializable, ERC20Upgradeable, ERC20BurnableUpgradeable,
 
     function initialize(address stakingPool, address daoTreasury, address presalePool) public initializer {
         __ERC20_init("Mortar", "MRTR");
-        __ERC20Burnable_init();
         __Ownable_init(msg.sender);
 
         // Initial token distribution

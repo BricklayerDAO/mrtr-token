@@ -17,7 +17,6 @@ contract MRTRTokenTest is Test {
     address public user2;
 
     function setUp() public {
-        // Set up addresses
         owner = address(this);
         stakingPool = makeAddr("stakingPool");
         daoTreasury = makeAddr("daoTreasury");
