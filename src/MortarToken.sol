@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity 0.8.26;
 
 import "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
@@ -10,7 +10,7 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
  * @dev Implementation of the MRTR token with burnable and upgradable
  */
 contract MRTRToken is Initializable, ERC20Upgradeable, OwnableUpgradeable {
-    uint256 private constant TOTAL_SUPPLY = 1_000_000_000 * 10 ** 18; // 1 billion tokens with 18 decimals
+    uint256 private constant TOTAL_SUPPLY = 1_000_000_000 ether; // 1 billion tokens with 18 decimals
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -22,9 +22,9 @@ contract MRTRToken is Initializable, ERC20Upgradeable, OwnableUpgradeable {
         __Ownable_init(msg.sender);
 
         // Initial token distribution
-        _mint(stakingPool, 450_000_000 * 10 ** 18); // Staking Rewards Pool
-        _mint(daoTreasury, 500_000_000 * 10 ** 18); // DAO Treasury Pool
-        _mint(presalePool, 50_000_000 * 10 ** 18); // Presale Pool
+        _mint(stakingPool, 450_000_000 ether); // Staking Rewards Pool
+        _mint(daoTreasury, 500_000_000 ether); // DAO Treasury Pool
+        _mint(presalePool, 50_000_000 ether); // Presale Pool
     }
 
     function burn(address _account, uint256 _amount) public onlyOwner {
