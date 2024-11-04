@@ -152,32 +152,40 @@ contract MortarStaking is ERC4626Upgradeable, ERC20Votes {
     }
 
     function stake(uint256 amount, address receiver) public {
+        // Step 1: Update the epoch state
         _updateEpoch();
+        // Step 2: Deposit the amount
         uint256 shares = super.deposit(amount, receiver);
+        // Step 3: Update the user state
         (uint256 currentEpoch,,) = getCurrentQuarter();
-        // 1. reward debt
+        // 3.1 reward debt
         UserInfo storage user = userEpochInfo[msg.sender][currentEpoch];
         user.rewardDebt = (shares * accRewardPerShare[currentEpoch]) / 1e12;
-
+        // 3.2 total rewards
         user.rewardAccrued += pendingRewards(msg.sender);
-        // 2. total shares
+        // 3.3 total shares
         epochs[currentEpoch].totalShares += shares;
-        // 3. total staked
+        // 3.4 total staked
         epochs[currentEpoch].totalStaked += amount;
     }
 
     function unstake(uint256 amount) public {
+        // Step 1: Update the epoch state
         _updateEpoch();
+        // Step 2: Withdraw the amount
         uint256 shares = super.withdraw(msg.sender);
+        // Step 2: Update the user state
         (uint256 currentEpoch,,) = getCurrentQuarter();
         UserInfo storage user = userEpochInfo[currentEpoch][msg.sender];
 
+        uint256 remainingShares = epochs[currentEpoch].totalShares - amount;
+
         // reward debt
-        user.rewardDebt -= (shares * accRewardPerShare) / 1e12;
+        user.rewardDebt = (remainingShares * accRewardPerShare) / 1e12;
         // total shares
-        epochs[currentEpoch].totalShares -= shares;
+        epochs[currentEpoch].totalShares = remainingShares;
         // total staked
-        epochs[currentEpoch].totalStaked -= amount;
+        epochs[currentEpoch].totalStaked -= shares;
     }
 
     /// @dev Binary search to get the current quarter index, start timestamp and end timestamp
