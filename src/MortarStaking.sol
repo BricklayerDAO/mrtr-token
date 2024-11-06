@@ -119,9 +119,14 @@ contract MortarStaking is ERC4626Upgradeable, ERC20Votes {
         _disableInitializers();
     }
 
-    function initialize(string _name, string _symbol) public initializer {
-        __ERC4626_init("Mortar", "MRTR");
+    function initialize(string memory _name, string memory _symbol, IERC20 _asset) public initializer {
+        __ERC4626_init(_asset);
+        __ERC20_init(_name, _symbol);
         __ERC20Votes_init();
+
+        // Initialize reward rate
+        uint256 totalDuration = quarterTimestamps[quarterTimestamps.length - 1] - quarterTimestamps[0];
+        rewardRate = TOTAL_REWARDS / totalDuration;
     }
 
     function _updateEpoch() internal {
