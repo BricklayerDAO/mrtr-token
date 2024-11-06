@@ -212,15 +212,16 @@ contract MortarStaking is ERC4626Upgradeable, ERC20Votes {
     function getCurrentQuarter() public view returns (uint256, uint256, uint256) {
         uint256 currentTimestamp = block.timestamp;
         uint256 low = 0;
-        uint256 high = quarters.length - 1;
+        uint256 high = quarterTimestamps.length - 1;
 
         while (low <= high) {
             uint256 mid = (low + high) / 2;
-            Quarter memory q = quarters[mid];
+            uint256 quarterEnd = quarterTimestamps[mid];
+            uint256 quarterStart = mid == 0 ? quarterTimestamps[0] : quarterTimestamps[mid - 1];
 
-            if (currentTimestamp >= q.startTimestamp && currentTimestamp < q.endTimestamp) {
-                return (mid, q.startTimestamp, q.endTimestamp);
-            } else if (currentTimestamp < q.startTimestamp) {
+            if (currentTimestamp >= quarterStart && currentTimestamp < quarterEnd) {
+                return (mid, quarterStart, quarterEnd);
+            } else if (currentTimestamp < quarterStart) {
                 if (mid == 0) break; // Prevent underflow
                 high = mid - 1;
             } else {
@@ -228,16 +229,9 @@ contract MortarStaking is ERC4626Upgradeable, ERC20Votes {
             }
         }
 
-        // Base case
-        return (0, 0, 0);
-    }
-
-    /// @notice The rewards are distributed linearly over the duration
-    /// @dev The rewards per quarter are not constant
-    /// @todo: Remove this function and move it to `initialize()` function and make the rewardRate a variable
-    function rewardRate() public view returns (uint256) {
-        uint256 totalTimeDuration = quarterTimestamps[80] - quarterTimestamps[0];
-        return TOTAL_REWARDS / totalTimeDuration;
+        // If current time is beyond the last quarter, return the last quarter's index and timestamps
+        uint256 lastIndex = quarterTimestamps.length - 1;
+        return (lastIndex, quarterTimestamps[lastIndex - 1], quarterTimestamps[lastIndex]);
     }
 
     /// @notice calculate the rewards for the given duration
