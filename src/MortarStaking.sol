@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { ERC4626Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
 import { ERC20VotesUpgradeable } from
     "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20VotesUpgradeable.sol";
 import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import { ERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
-import "@openzeppelin/contracts/utils/math/Math.sol";
+import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 
 contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
     uint256 private constant TOTAL_REWARDS = 450_000_000 ether;
@@ -118,14 +120,22 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
         2_365_420_800 // Quarter 80 end
     ];
 
+    modifier isStakeValid() {
+        require(
+            block.timestamp >= quarterTimestamps[0] && block.timestamp <= quarterTimestamps[TOTAL_QUARTERS],
+            "Staking is not allowed outside the staking period"
+        );
+        _;
+    }
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
     }
 
-    function initialize(string memory _name, string memory _symbol, IERC20 _asset) public initializer {
+    function initialize(IERC20 _asset) public initializer {
         __ERC4626_init(_asset);
-        __ERC20_init(_name, _symbol);
+        __ERC20_init("XMortar", "xMRTR");
         __ERC20Votes_init();
 
         // Initialize reward rate
@@ -174,7 +184,7 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
         return pending;
     }
 
-    function stake(uint256 amount, address receiver) public {
+    function stake(uint256 amount, address receiver) public isStakeValid {
         // Update the epoch state
         _updateEpoch();
 
@@ -188,27 +198,6 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
 
         // Withdraw the amount
         super.withdraw(amount, msg.sender, msg.sender);
-
-        // No further action needed; state updates are handled in _update()
-    }
-
-    function unstake(uint256 amount) public {
-        // Step 1: Update the epoch state
-        _updateEpoch();
-        // Step 2: Withdraw the amount
-        uint256 shares = super.withdraw(msg.sender);
-        // Step 2: Update the user state
-        (uint256 currentQuarter,,) = getCurrentQuarter();
-        UserInfo storage user = userEpochInfo[currentQuarter][msg.sender];
-
-        uint256 remainingShares = epochs[currentQuarter].totalShares - amount;
-
-        // reward debt
-        user.rewardDebt = (remainingShares * epochs[currentQuarter].accRewardPerShare) / 1e12;
-        // total shares
-        epochs[currentQuarter].totalShares = remainingShares;
-        // total staked
-        epochs[currentQuarter].totalStaked -= shares;
     }
 
     /// @dev Binary search to get the current quarter index, start timestamp and end timestamp
@@ -226,7 +215,7 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
             if (currentTimestamp >= quarterStart && currentTimestamp < quarterEnd) {
                 return (mid, quarterStart, quarterEnd);
             } else if (currentTimestamp < quarterStart) {
-                if (mid == 0) break; // Prevent underflow
+                if (mid == 0) break;
                 high = mid - 1;
             } else {
                 low = mid + 1;
@@ -243,21 +232,16 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
         return rewardRate * (end - start);
     }
 
-    function balanceOf(address account)
-        public
-        view
-        override(ERC20Upgradeable, ERC20VotesUpgradeable)
-        returns (uint256)
-    {
+    function balanceOf(address account) public view override(ERC20Upgradeable, IERC20) returns (uint256) {
         uint256 balance = super.balanceOf(account);
         uint256 totalShares;
-        (uint256 currentQuarter,, uint256 endTimestamp) = getCurrentQuarter();
+        (uint256 currentQuarter,,) = getCurrentQuarter();
         // Calculate the rewards for the user till now
         for (uint256 i = 0; i < currentQuarter; i++) {
             UserInfo memory userInfo = userEpochInfo[account][i];
             uint256 totalReward = userInfo.rewardAccrued;
-            uint256 totalAccRewardPerShare =
-                ((endTimestamp - epochs[i].lastUpdateTimestamp) * rewardRate) / epochs[i].totalShares;
+            uint256 totalAccRewardPerShare = epochs[i].accRewardPerShare
+                + (calculateRewards(epochs[i].lastUpdateTimestamp, quarterTimestamps[i + 1]) / epochs[i].totalShares);
             // Calculated the total reward and the shares from those rewards, between the time of last user action
             // (deposit/withdraw) and quarter end timestamp
             totalReward += ((userInfo.shares * epochs[i].accRewardPerShare) / 1e12) - userInfo.rewardDebt;
@@ -267,7 +251,15 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
         return balance + totalShares;
     }
 
-    function _update(address from, address to, uint256 amount) internal virtual override {
+    function _update(
+        address from,
+        address to,
+        uint256 amount
+    )
+        internal
+        virtual
+        override(ERC20Upgradeable, ERC20VotesUpgradeable)
+    {
         super._update(from, to, amount);
         _updateEpoch();
 
@@ -291,8 +283,6 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
             // Update epoch totals
             epoch.totalShares += amount;
             epoch.totalStaked += convertToAssets(amount);
-
-            emit Staked(to, convertToAssets(amount), amount);
         } else if (to == address(0)) {
             // Unstake = burn
             UserInfo storage fromUser = userEpochInfo[from][currentQuarter];
@@ -310,8 +300,6 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
             // Update epoch totals
             epoch.totalShares -= amount;
             epoch.totalStaked -= convertToAssets(amount);
-
-            emit Unstaked(from, convertToAssets(amount), amount);
         } else {
             // Transfers
 
@@ -339,8 +327,8 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
     }
 
     /// @dev override totalSupply to return the total supply of the token
-    function totalSupply() public view override returns (uint256) {
-        uint256 totalSupply = super.totalSupply();
+    function totalSupply() public view override(ERC20Upgradeable, IERC20) returns (uint256) {
+        uint256 supply = super.totalSupply();
 
         // Calculate each quarter's rewards, convert them to shares and add them to the total supply
         for (uint256 i = 0; i < TOTAL_QUARTERS; i++) {
@@ -350,17 +338,21 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
 
             uint256 lastUpdateTimestamp = epochs[i].lastUpdateTimestamp;
             uint256 rewardsAfterLastAction = calculateRewards(lastUpdateTimestamp, quarterTimestamps[i + 1]);
-            
+
             uint256 shares = (rewardsAfterLastAction * epochs[i].totalShares) / epochs[i].totalStaked;
 
-            totalSupply += shares;
+            supply += shares;
         }
 
-        return totalSupply;
+        return supply;
     }
 
     /// @dev override _getVotingUnits to return the balance of the user
     function _getVotingUnits(address account) internal view override returns (uint256) {
         return balanceOf(account);
+    }
+
+    function decimals() public view virtual override(ERC4626Upgradeable, ERC20Upgradeable) returns (uint8) {
+        return super.decimals();
     }
 }
