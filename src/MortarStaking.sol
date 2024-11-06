@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
+import "forge-std/console.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { ERC4626Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
@@ -31,94 +32,13 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
             // staking
         uint256 shares; // To calculate the reward for the user in a particular epoch -- reward = accRewardPerEpoch *
             // shares
+        uint256 lastClaimedEpoch;
     }
 
     mapping(uint256 => Epoch) public epochs;
     mapping(address => mapping(uint256 => UserInfo)) public userEpochInfo;
 
-    uint256[] public quarterTimestamps = [
-        1_735_084_800, // Quarter 1 start
-        1_742_860_800, // Quarter 1 end
-        1_748_822_400, // Quarter 2 end
-        1_759_180_800, // Quarter 3 end
-        1_766_601_600, // Quarter 4 end
-        1_774_377_600, // Quarter 5 end
-        1_782_067_200, // Quarter 6 end
-        1_790_697_600, // Quarter 7 end
-        1_798_118_400, // Quarter 8 end
-        1_805_894_400, // Quarter 9 end
-        1_813_584_000, // Quarter 10 end
-        1_822_214_400, // Quarter 11 end
-        1_829_635_200, // Quarter 12 end
-        1_837_411_200, // Quarter 13 end
-        1_845_100_800, // Quarter 14 end
-        1_853_731_200, // Quarter 15 end
-        1_861_152_000, // Quarter 16 end
-        1_868_928_000, // Quarter 17 end
-        1_876_617_600, // Quarter 18 end
-        1_885_248_000, // Quarter 19 end
-        1_892_668_800, // Quarter 20 end
-        1_900_444_800, // Quarter 21 end
-        1_908_134_400, // Quarter 22 end
-        1_916_764_800, // Quarter 23 end
-        1_924_185_600, // Quarter 24 end
-        1_931_961_600, // Quarter 25 end
-        1_939_651_200, // Quarter 26 end
-        1_948_281_600, // Quarter 27 end
-        1_955_702_400, // Quarter 28 end
-        1_963_478_400, // Quarter 29 end
-        1_971_168_000, // Quarter 30 end
-        1_979_798_400, // Quarter 31 end
-        1_987_219_200, // Quarter 32 end
-        1_994_995_200, // Quarter 33 end
-        2_002_684_800, // Quarter 34 end
-        2_011_315_200, // Quarter 35 end
-        2_018_736_000, // Quarter 36 end
-        2_026_512_000, // Quarter 37 end
-        2_034_201_600, // Quarter 38 end
-        2_042_832_000, // Quarter 39 end
-        2_050_252_800, // Quarter 40 end
-        2_058_028_800, // Quarter 41 end
-        2_065_718_400, // Quarter 42 end
-        2_074_348_800, // Quarter 43 end
-        2_081_769_600, // Quarter 44 end
-        2_089_545_600, // Quarter 45 end
-        2_097_235_200, // Quarter 46 end
-        2_105_865_600, // Quarter 47 end
-        2_113_286_400, // Quarter 48 end
-        2_121_062_400, // Quarter 49 end
-        2_128_752_000, // Quarter 50 end
-        2_137_382_400, // Quarter 51 end
-        2_144_803_200, // Quarter 52 end
-        2_152_579_200, // Quarter 53 end
-        2_160_268_800, // Quarter 54 end
-        2_168_899_200, // Quarter 55 end
-        2_176_320_000, // Quarter 56 end
-        2_184_096_000, // Quarter 57 end
-        2_191_785_600, // Quarter 58 end
-        2_200_416_000, // Quarter 59 end
-        2_207_836_800, // Quarter 60 end
-        2_215_612_800, // Quarter 61 end
-        2_223_302_400, // Quarter 62 end
-        2_231_932_800, // Quarter 63 end
-        2_239_353_600, // Quarter 64 end
-        2_247_129_600, // Quarter 65 end
-        2_254_819_200, // Quarter 66 end
-        2_263_449_600, // Quarter 67 end
-        2_270_870_400, // Quarter 68 end
-        2_278_646_400, // Quarter 69 end
-        2_286_336_000, // Quarter 70 end
-        2_294_966_400, // Quarter 71 end
-        2_302_387_200, // Quarter 72 end
-        2_310_163_200, // Quarter 73 end
-        2_317_852_800, // Quarter 74 end
-        2_326_483_200, // Quarter 75 end
-        2_333_904_000, // Quarter 76 end
-        2_341_680_000, // Quarter 77 end
-        2_349_369_600, // Quarter 78 end
-        2_358_000_000, // Quarter 79 end
-        2_365_420_800 // Quarter 80 end
-    ];
+    uint256[] public quarterTimestamps;
 
     modifier isStakeValid() {
         require(
@@ -138,6 +58,89 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
         __ERC20_init("XMortar", "xMRTR");
         __ERC20Votes_init();
 
+        quarterTimestamps = [
+            1_735_084_800, // Quarter 1 start
+            1_742_860_800, // Quarter 1 end
+            1_748_822_400, // Quarter 2 end
+            1_759_180_800, // Quarter 3 end
+            1_766_601_600, // Quarter 4 end
+            1_774_377_600, // Quarter 5 end
+            1_782_067_200, // Quarter 6 end
+            1_790_697_600, // Quarter 7 end
+            1_798_118_400, // Quarter 8 end
+            1_805_894_400, // Quarter 9 end
+            1_813_584_000, // Quarter 10 end
+            1_822_214_400, // Quarter 11 end
+            1_829_635_200, // Quarter 12 end
+            1_837_411_200, // Quarter 13 end
+            1_845_100_800, // Quarter 14 end
+            1_853_731_200, // Quarter 15 end
+            1_861_152_000, // Quarter 16 end
+            1_868_928_000, // Quarter 17 end
+            1_876_617_600, // Quarter 18 end
+            1_885_248_000, // Quarter 19 end
+            1_892_668_800, // Quarter 20 end
+            1_900_444_800, // Quarter 21 end
+            1_908_134_400, // Quarter 22 end
+            1_916_764_800, // Quarter 23 end
+            1_924_185_600, // Quarter 24 end
+            1_931_961_600, // Quarter 25 end
+            1_939_651_200, // Quarter 26 end
+            1_948_281_600, // Quarter 27 end
+            1_955_702_400, // Quarter 28 end
+            1_963_478_400, // Quarter 29 end
+            1_971_168_000, // Quarter 30 end
+            1_979_798_400, // Quarter 31 end
+            1_987_219_200, // Quarter 32 end
+            1_994_995_200, // Quarter 33 end
+            2_002_684_800, // Quarter 34 end
+            2_011_315_200, // Quarter 35 end
+            2_018_736_000, // Quarter 36 end
+            2_026_512_000, // Quarter 37 end
+            2_034_201_600, // Quarter 38 end
+            2_042_832_000, // Quarter 39 end
+            2_050_252_800, // Quarter 40 end
+            2_058_028_800, // Quarter 41 end
+            2_065_718_400, // Quarter 42 end
+            2_074_348_800, // Quarter 43 end
+            2_081_769_600, // Quarter 44 end
+            2_089_545_600, // Quarter 45 end
+            2_097_235_200, // Quarter 46 end
+            2_105_865_600, // Quarter 47 end
+            2_113_286_400, // Quarter 48 end
+            2_121_062_400, // Quarter 49 end
+            2_128_752_000, // Quarter 50 end
+            2_137_382_400, // Quarter 51 end
+            2_144_803_200, // Quarter 52 end
+            2_152_579_200, // Quarter 53 end
+            2_160_268_800, // Quarter 54 end
+            2_168_899_200, // Quarter 55 end
+            2_176_320_000, // Quarter 56 end
+            2_184_096_000, // Quarter 57 end
+            2_191_785_600, // Quarter 58 end
+            2_200_416_000, // Quarter 59 end
+            2_207_836_800, // Quarter 60 end
+            2_215_612_800, // Quarter 61 end
+            2_223_302_400, // Quarter 62 end
+            2_231_932_800, // Quarter 63 end
+            2_239_353_600, // Quarter 64 end
+            2_247_129_600, // Quarter 65 end
+            2_254_819_200, // Quarter 66 end
+            2_263_449_600, // Quarter 67 end
+            2_270_870_400, // Quarter 68 end
+            2_278_646_400, // Quarter 69 end
+            2_286_336_000, // Quarter 70 end
+            2_294_966_400, // Quarter 71 end
+            2_302_387_200, // Quarter 72 end
+            2_310_163_200, // Quarter 73 end
+            2_317_852_800, // Quarter 74 end
+            2_326_483_200, // Quarter 75 end
+            2_333_904_000, // Quarter 76 end
+            2_341_680_000, // Quarter 77 end
+            2_349_369_600, // Quarter 78 end
+            2_358_000_000, // Quarter 79 end
+            2_365_420_800 // Quarter 80 end
+        ];
         // Initialize reward rate
         uint256 totalDuration = quarterTimestamps[quarterTimestamps.length - 1] - quarterTimestamps[0];
         rewardRate = TOTAL_REWARDS / totalDuration;
@@ -145,13 +148,13 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
 
     function _updateEpoch() internal {
         uint256 currentTime = block.timestamp;
-        (uint256 currentQuarter, uint256 startTime, uint256 endTime) = getCurrentQuarter();
+        (int256 currentQuarter, uint256 startTime, uint256 endTime) = getCurrentQuarter();
 
-        if (currentTime <= epochs[currentQuarter].lastUpdateTimestamp) {
+        if (currentTime <= epochs[uint256(currentQuarter)].lastUpdateTimestamp) {
             return;
         }
 
-        Epoch storage currentEpoch = epochs[currentQuarter];
+        Epoch storage currentEpoch = epochs[uint256(currentQuarter)];
 
         // Only calculate rewards within quarter boundaries
         uint256 calculationEndTime = Math.min(currentTime, endTime);
@@ -166,8 +169,8 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
     }
 
     function convertToShares(uint256 assets) public view override returns (uint256) {
-        (uint256 currentQuarter,,) = getCurrentQuarter();
-        Epoch memory currentEpoch = epochs[currentQuarter];
+        (int256 currentQuarter,,) = getCurrentQuarter();
+        Epoch memory currentEpoch = epochs[uint256(currentQuarter)];
 
         if (currentEpoch.totalStaked == 0) {
             return assets;
@@ -178,9 +181,9 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
 
     function pendingRewards(address account) public view returns (uint256) {
         uint256 userShares = balanceOf(account);
-        (uint256 quarterIndex,,) = getCurrentQuarter();
-        uint256 accumulatedReward = (userShares * epochs[quarterIndex].accRewardPerShare) / 1e12;
-        uint256 pending = accumulatedReward - userEpochInfo[account][quarterIndex].rewardDebt;
+        (int256 quarterIndex,,) = getCurrentQuarter();
+        uint256 accumulatedReward = (userShares * epochs[uint256(quarterIndex)].accRewardPerShare) / 1e12;
+        uint256 pending = accumulatedReward - userEpochInfo[account][uint256(quarterIndex)].rewardDebt;
         return pending;
     }
 
@@ -200,31 +203,45 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
         super.withdraw(amount, msg.sender, msg.sender);
     }
 
-    /// @dev Binary search to get the current quarter index, start timestamp and end timestamp
-    // Function to get the current quarter index and its start and end timestamps
-    function getCurrentQuarter() public view returns (uint256, uint256, uint256) {
-        uint256 currentTimestamp = block.timestamp;
+    /// @dev Binary search to get the current quarter index, start timestamp, and end timestamp
+    function getCurrentQuarter() public view returns (int256 index, uint256 start, uint256 end) {
+        uint256[] memory arr = quarterTimestamps;
+        uint256 len = arr.length;
+        uint256 t = block.timestamp;
+
+        if (t < arr[0] || t > arr[len - 1]) {
+            return (-1, 0, 0);
+        }
+
         uint256 low = 0;
-        uint256 high = quarterTimestamps.length - 1;
+        uint256 high = len - 1;
 
         while (low <= high) {
             uint256 mid = (low + high) / 2;
-            uint256 quarterEnd = quarterTimestamps[mid];
-            uint256 quarterStart = mid == 0 ? quarterTimestamps[0] : quarterTimestamps[mid - 1];
-
-            if (currentTimestamp >= quarterStart && currentTimestamp < quarterEnd) {
-                return (mid, quarterStart, quarterEnd);
-            } else if (currentTimestamp < quarterStart) {
-                if (mid == 0) break;
-                high = mid - 1;
-            } else {
+            if (arr[mid] == t) {
+                if (mid == 0) {
+                    return (0, arr[0], arr[1]);
+                } else {
+                    return (int256(mid), arr[mid - 1], arr[mid]);
+                }
+            } else if (arr[mid] < t) {
                 low = mid + 1;
+            } else {
+                if (mid == 0) {
+                    return (0, arr[0], arr[1]);
+                }
+                high = mid - 1;
             }
         }
 
-        // If current time is beyond the last quarter, return the last quarter's index and timestamps
-        uint256 lastIndex = quarterTimestamps.length - 1;
-        return (lastIndex, quarterTimestamps[lastIndex - 1], quarterTimestamps[lastIndex]);
+        // After the loop, 'low' is the smallest index such that arr[low] > t
+        if (low == 0) {
+            return (0, arr[0], arr[1]);
+        } else if (low < len) {
+            return (int256(low), arr[low - 1], arr[low]);
+        } else {
+            return (-1, 0, 0);
+        }
     }
 
     /// @notice calculate the rewards for the given duration
@@ -235,16 +252,16 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
     function balanceOf(address account) public view override(ERC20Upgradeable, IERC20) returns (uint256) {
         uint256 balance = super.balanceOf(account);
         uint256 totalShares;
-        (uint256 currentQuarter,,) = getCurrentQuarter();
+        (int256 currentQuarter,,) = getCurrentQuarter();
         // Calculate the rewards for the user till now
-        for (uint256 i = 0; i < currentQuarter; i++) {
+        for (uint256 i = 0; i < uint256(currentQuarter); i++) {
             UserInfo memory userInfo = userEpochInfo[account][i];
-            uint256 totalReward = userInfo.rewardAccrued;
             uint256 totalAccRewardPerShare = epochs[i].accRewardPerShare
                 + (calculateRewards(epochs[i].lastUpdateTimestamp, quarterTimestamps[i + 1]) / epochs[i].totalShares);
             // Calculated the total reward and the shares from those rewards, between the time of last user action
             // (deposit/withdraw) and quarter end timestamp
-            totalReward += ((userInfo.shares * epochs[i].accRewardPerShare) / 1e12) - userInfo.rewardDebt;
+            uint256 totalReward =
+                userInfo.rewardAccrued + ((userInfo.shares * totalAccRewardPerShare) / 1e12) - userInfo.rewardDebt;
             totalShares += (totalReward * epochs[i].totalShares) / epochs[i].totalStaked;
         }
 
@@ -263,12 +280,12 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
         super._update(from, to, amount);
         _updateEpoch();
 
-        (uint256 currentQuarter,,) = getCurrentQuarter();
-        Epoch storage epoch = epochs[currentQuarter];
+        (int256 currentQuarter,,) = getCurrentQuarter();
+        Epoch storage epoch = epochs[uint256(currentQuarter)];
 
         if (from == address(0)) {
             // Stake == mint
-            UserInfo storage toUser = userEpochInfo[to][currentQuarter];
+            UserInfo storage toUser = userEpochInfo[to][uint256(currentQuarter)];
             uint256 pending = pendingRewards(to);
 
             // Update user accrued rewards
@@ -285,7 +302,7 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
             epoch.totalStaked += convertToAssets(amount);
         } else if (to == address(0)) {
             // Unstake = burn
-            UserInfo storage fromUser = userEpochInfo[from][currentQuarter];
+            UserInfo storage fromUser = userEpochInfo[from][uint256(currentQuarter)];
             uint256 pending = pendingRewards(from);
 
             // Update user accrued rewards
@@ -305,7 +322,7 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
 
             // Update 'from' user
             {
-                UserInfo storage fromUser = userEpochInfo[from][currentQuarter];
+                UserInfo storage fromUser = userEpochInfo[from][uint256(currentQuarter)];
                 uint256 pendingFrom = pendingRewards(from);
                 fromUser.rewardAccrued += pendingFrom;
                 fromUser.shares -= amount;
@@ -314,7 +331,7 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
 
             // Update 'to' user
             {
-                UserInfo storage toUser = userEpochInfo[to][currentQuarter];
+                UserInfo storage toUser = userEpochInfo[to][uint256(currentQuarter)];
                 uint256 pendingTo = pendingRewards(to);
                 toUser.rewardAccrued += pendingTo;
                 toUser.shares += amount;
