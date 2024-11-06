@@ -131,21 +131,35 @@ contract MortarStaking is ERC4626Upgradeable, ERC20Votes {
 
     function _updateEpoch() internal {
         uint256 currentTime = block.timestamp;
+        (uint256 currentQuarter, uint256 startTime, uint256 endTime) = getCurrentQuarter();
 
-        if (currentTime <= lastUpdateTime) {
+        if (currentTime <= epochs[currentQuarter].lastUpdateTimestamp) {
             return;
         }
 
-        // Do not consider reward distribution if no one has staked
-        if (totalStaked == 0) {
-            lastUpdateTime = currentTime;
-            return;
+        Epoch storage currentEpoch = epochs[currentQuarter];
+
+        // Only calculate rewards within quarter boundaries
+        uint256 calculationEndTime = Math.min(currentTime, endTime);
+        uint256 calculationStartTime = Math.max(currentEpoch.lastUpdateTimestamp, startTime);
+
+        if (currentEpoch.totalStaked > 0) {
+            uint256 rewards = calculateRewards(calculationStartTime, calculationEndTime);
+            currentEpoch.accRewardPerShare += (rewards * 1e12) / currentEpoch.totalStaked;
         }
 
-        // Calculate rewards till now
-        uint256 rewards = calculateRewards(lastUpdateTime, currentTime);
-        accRewardPerShare += (rewards * 1e12) / totalStaked;
-        lastUpdateTime = currentTime;
+        currentEpoch.lastUpdateTimestamp = calculationEndTime;
+    }
+
+    function convertToShares(uint256 assets) public view override returns (uint256) {
+        (uint256 currentQuarter,,) = getCurrentQuarter();
+        Epoch memory currentEpoch = epochs[currentQuarter];
+
+        if (currentEpoch.totalStaked == 0) {
+            return assets;
+        }
+
+        return (assets * currentEpoch.totalShares) / currentEpoch.totalStaked;
     }
 
     function pendingRewards(address account) public view returns (uint256) {
