@@ -26,7 +26,7 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
 
     struct UserInfo {
         uint256 rewardAccrued; // Total reward - Not needed actually, but can be used for "optimization"
-        uint256 lastUpdateTime; // To calculate the reward from last action till the quarter end timestamp
+        uint256 lastUpdateTimestamp; // To calculate the reward from last action till the quarter end timestamp
         uint256 rewardDebt; // To know how much the user's current deposit would have made since the beginning of
             // staking
         uint256 shares; // To calculate the reward for the user in a particular epoch -- reward = accRewardPerEpoch *
@@ -36,6 +36,8 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
     mapping(uint256 => Quarter) public quarters;
     mapping(address => mapping(uint256 => UserInfo)) public userQuarterInfo;
     mapping(address => uint256) public userLastProcessedQuarter;
+
+    uint256[50] private __gap;
 
     uint256[] public quarterTimestamps = [
         1_735_084_800, // Quarter 1 start
@@ -144,6 +146,159 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
         rewardRate = TOTAL_REWARDS / totalDuration;
     }
 
+    function deposit(uint256 assets, address receiver) public override isStakeValid returns (uint256) {
+        // Validation
+        require(assets > 0, "Cannot stake 0");
+        require(receiver != address(0), "Cannot stake to the zero address");
+        // Update current quarter
+        _updateQuarter();
+        // Process rewards -> shares for all previous quarters for the user
+        _processPendingRewards(receiver);
+        // Deposit the assets
+        uint256 shares = super.deposit(assets, receiver);
+        // Update the user info
+        _afterDepositOrMint(assets, shares, receiver);
+
+        return shares;
+    }
+
+    function mint(uint256 shares, address receiver) public override isStakeValid returns (uint256) {
+        // Validation
+        require(shares > 0, "Cannot mint 0");
+        require(receiver != address(0), "Cannot mint to the zero address");
+        // Update current quarter
+        _updateQuarter();
+        // Process rewards -> shares for all previous quarters for the user
+        _processPendingRewards(receiver);
+        // Update the user info
+        // Deposit the assets
+        uint256 assets = super.mint(shares, receiver);
+        /// @todo Reentrancy
+        _afterDepositOrMint(assets, shares, receiver);
+
+        return assets;
+    }
+
+    function _afterDepositOrMint(uint256 assets, uint256 shares, address receiver) private {
+        (uint256 currentQuarter,,) = getCurrentQuarter();
+        UserInfo memory _userInfo = userQuarterInfo[receiver][currentQuarter];
+        Quarter memory _quarter = quarters[currentQuarter];
+        // Update user shares
+        _userInfo.shares += shares;
+        // Update user reward debt
+        _userInfo.rewardDebt = (_userInfo.shares * 1e12) / _quarter.accRewardPerShare;
+        // Process reward
+        _userInfo.rewardAccrued += _calculatePendingRewards(receiver, currentQuarter);
+        // Update the last update time
+        _userInfo.lastUpdateTimestamp = block.timestamp;
+
+        // Update quarter totals
+        _quarter.totalShares += shares;
+        _quarter.totalStaked += assets;
+
+        // Save the updated user and quarter data
+        userQuarterInfo[receiver][currentQuarter] = _userInfo;
+        quarters[currentQuarter] = _quarter;
+    }
+
+    function withdraw(uint256 assets, address receiver, address owner) public override returns (uint256) {
+        // Validation
+        require(assets > 0, "Cannot withdraw 0");
+        require(receiver != address(0), "Cannot withdraw to the zero address");
+        // Update current quarter
+        _updateQuarter();
+        // Process rewards -> shares for all previous quarters for the user
+        _processPendingRewards(owner);
+        // Update the user info
+        // Withdraw the assets
+        uint256 shares = super.withdraw(assets, receiver, owner);
+        /// @todo Reentrancy
+        _afterWithdrawOrRedeem(assets, shares, owner);
+
+        return shares;
+    }
+
+    function redeem(uint256 shares, address receiver, address owner) public override returns (uint256) {
+        // Validation
+        require(shares > 0, "Cannot redeem 0");
+        require(receiver != address(0), "Cannot redeem to the zero address");
+        // Update current quarter
+        _updateQuarter();
+        // Process rewards -> shares for all previous quarters for the user
+        _processPendingRewards(owner);
+        // Update the user info
+        // Redeem the assets
+        uint256 assets = super.redeem(shares, receiver, owner);
+        _afterWithdrawOrRedeem(assets, shares, owner);
+
+        return assets;
+    }
+
+    function _afterWithdrawOrRedeem(uint256 assets, uint256 shares, address owner) private {
+        (uint256 currentQuarter,,) = getCurrentQuarter();
+        UserInfo memory _userInfo = userQuarterInfo[owner][currentQuarter];
+        Quarter memory _quarter = quarters[currentQuarter];
+        // Update user shares
+        _userInfo.shares -= shares;
+        // Process reward
+        _userInfo.rewardAccrued += _calculatePendingRewards(owner, currentQuarter);
+        // Update last update time
+        _userInfo.lastUpdateTimestamp = block.timestamp;
+        // Update user reward debt
+        _userInfo.rewardDebt = (_userInfo.shares * 1e12) / _quarter.accRewardPerShare;
+        // Update _quarter totals
+        _quarter.totalShares -= shares;
+        _quarter.totalStaked -= assets;
+
+        // Save the updated user and quarter data
+        userQuarterInfo[owner][currentQuarter] = _userInfo;
+        quarters[currentQuarter] = _quarter;
+    }
+
+    function transfer(address to, uint256 amount) public virtual override(ERC20Upgradeable, IERC20) returns (bool) {
+        _updateQuarter();
+        _processPendingRewards(msg.sender);
+        _processPendingRewards(to);
+        bool success = super.transfer(to, amount);
+        // Update the current quarter's UserInfo
+        _afterTransfer(msg.sender, to, amount);
+        return success;
+    }
+
+    function transferFrom(
+        address from,
+        address to,
+        uint256 amount
+    )
+        public
+        virtual
+        override(ERC20Upgradeable, IERC20)
+        returns (bool)
+    {
+        _updateQuarter();
+        _processPendingRewards(from);
+        _processPendingRewards(to);
+        bool success = super.transferFrom(from, to, amount);
+        // Update the current quarter's UserInfo
+        _afterTransfer(from, to, amount);
+        return success;
+    }
+
+    function _afterTransfer(address from, address to, uint256 amount) internal {
+        (uint256 currentQuarter,,) = getCurrentQuarter();
+        Quarter storage quarter = quarters[currentQuarter];
+
+        // Update sender's shares
+        UserInfo storage senderInfo = userQuarterInfo[from][currentQuarter];
+        senderInfo.shares -= amount;
+        senderInfo.rewardDebt = (senderInfo.shares * 1e12) / quarter.accRewardPerShare;
+
+        // Update recipient's shares
+        UserInfo storage recipientInfo = userQuarterInfo[to][currentQuarter];
+        recipientInfo.shares += amount;
+        recipientInfo.rewardDebt = (recipientInfo.shares * 1e12) / quarter.accRewardPerShare;
+    }
+
     function _updateQuarter() internal {
         uint256 currentTime = block.timestamp;
         (uint256 currentQuarter, uint256 startTime, uint256 endTime) = getCurrentQuarter();
@@ -164,72 +319,6 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
         }
 
         _quarter.lastUpdateTimestamp = calculationEndTime;
-    }
-
-    function convertToShares(uint256 assets) public view override returns (uint256) {
-        (uint256 currentQuarter,,) = getCurrentQuarter();
-        Quarter memory _quarter = quarters[currentQuarter];
-
-        if (_quarter.totalStaked == 0) {
-            return assets;
-        }
-
-        return (assets * _quarter.totalShares) / _quarter.totalStaked;
-    }
-
-    function stake(uint256 amount, address receiver) public isStakeValid {
-        // Update the epoch state
-        _updateQuarter();
-
-        // Deposit the amount
-        uint256 shares = super.deposit(amount, receiver);
-        (uint256 currentQuarter,,) = getCurrentQuarter();
-        // Load the user and quarter data
-        UserInfo memory _userInfo = userQuarterInfo[receiver][currentQuarter];
-        Quarter memory _quarter = quarters[currentQuarter];
-        // Update user shares
-        _userInfo.shares += shares;
-        // Update user reward debt
-        _userInfo.rewardDebt = (_userInfo.shares * _quarter.accRewardPerShare) / 1e12;
-        // Process reward
-        _userInfo.rewardAccrued += _calculatePendingRewards(receiver, currentQuarter);
-        // Update the last update time
-        _userInfo.lastUpdateTime = block.timestamp;
-
-        // Update quarter totals
-        _quarter.totalShares += shares;
-        _quarter.totalStaked += amount;
-
-        // Save the updated user and quarter data
-        userQuarterInfo[receiver][currentQuarter] = _userInfo;
-        quarters[currentQuarter] = _quarter;
-    }
-
-    function unstake(uint256 amount, address receiver) public {
-        // Update the epoch state
-        _updateQuarter();
-
-        // Withdraw the amount
-        uint256 stake_ = super.withdraw(amount, receiver, msg.sender);
-        (uint256 currentQuarter,,) = getCurrentQuarter();
-        // Load the user and quarter data
-        UserInfo memory _userInfo = userQuarterInfo[msg.sender][currentQuarter];
-        Quarter memory _quarter = quarters[currentQuarter];
-        // Update user shares
-        _userInfo.shares -= amount;
-        // Process reward
-        _userInfo.rewardAccrued += _calculatePendingRewards(msg.sender, currentQuarter);
-        // Update last update time
-        _userInfo.lastUpdateTime = block.timestamp;
-        // Update user reward debt
-        _userInfo.rewardDebt = (_userInfo.shares * _quarter.accRewardPerShare) / 1e12;
-        // Update _quarter totals
-        _quarter.totalShares -= amount;
-        _quarter.totalStaked -= stake_;
-
-        // Save the updated user and quarter data
-        userQuarterInfo[msg.sender][currentQuarter] = _userInfo;
-        quarters[currentQuarter] = _quarter;
     }
 
     /// @dev Binary search to get the current quarter index, start timestamp and end timestamp
@@ -277,28 +366,35 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
     }
 
     function _calculatePendingRewards(address user_, uint256 quarter_) internal view returns (uint256) {
+        /// @todo Easy optimization: Merge parts of _calculatePendingRewards and _processPendingRewards()
+
         (uint256 currentQuarter,,) = getCurrentQuarter();
         UserInfo memory _userInfo = userQuarterInfo[user_][quarter_];
         Quarter memory _quarter = quarters[quarter_];
         uint256 totalReward = _userInfo.rewardAccrued;
         uint256 totalAccRewardPerShare = _quarter.accRewardPerShare;
+        /// @todo (quarter_ < currentQuarter) conditional is not needed
         if (quarter_ < currentQuarter && _quarter.lastUpdateTimestamp < quarterTimestamps[quarter_ + 1]) {
-            totalAccRewardPerShare = _quarter.accRewardPerShare
-                + (calculateRewards(_quarter.lastUpdateTimestamp, quarterTimestamps[quarter_ + 1]) / _quarter.totalShares);
+            if (_quarter.totalShares > 0) {
+                uint256 additionalRewards =
+                    calculateRewards(_quarter.lastUpdateTimestamp, quarterTimestamps[quarter_ + 1]);
+                totalAccRewardPerShare += (additionalRewards * 1e12) / _quarter.totalShares;
+            } else {
+                totalAccRewardPerShare = _quarter.accRewardPerShare;
+            }
         }
 
         // Calculated the total reward and the shares from those rewards, between the time of last user action
         // (deposit/withdraw) and quarter end timestamp
-        totalReward += ((_userInfo.shares * totalAccRewardPerShare) / 1e12) - _userInfo.rewardDebt;
+        totalReward += ((_userInfo.shares * 1e12) / totalAccRewardPerShare) - _userInfo.rewardDebt;
 
-        // @todo - Redo the asset -> share logic
-        return (totalReward * _quarter.totalShares) / _quarter.totalStaked;
+        return convertToShares(totalReward);
     }
 
     function _processPendingRewards(address user) internal {
         uint256 lastProcessedQuarter = userLastProcessedQuarter[user];
         (uint256 currentQuarter,,) = getCurrentQuarter();
-        uint256 shares;
+        uint256 totalShares;
         for (uint256 i = lastProcessedQuarter; i < currentQuarter; i++) {
             UserInfo storage userInfo = userQuarterInfo[user][i];
             Quarter storage quarter = quarters[i];
@@ -308,71 +404,30 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
             if (quarter.lastUpdateTimestamp < quarterTimestamps[i + 1]) {
                 uint256 rewards = calculateRewards(quarter.lastUpdateTimestamp, quarterTimestamps[i + 1]);
                 quarter.accRewardPerShare += (rewards * 1e12) / quarter.totalStaked;
+                /// @todo check division by zero
+                /// @todo Check for division by 0
                 quarter.lastUpdateTimestamp = quarterTimestamps[i + 1];
             }
 
             // Step 2: Calculate the pending rewards
-            uint256 accumulatedReward = (userInfo.shares * quarter.accRewardPerShare) / 1e12;
+            uint256 accumulatedReward = (userInfo.shares * 1e12) / quarter.accRewardPerShare;
             uint256 pending = userQuarterInfo[user][i].rewardAccrued + accumulatedReward - userInfo.rewardDebt;
 
             if (pending > 0) {
                 // Convert the pending rewards to shares
-                shares = convertToShares(pending);
-
+                uint256 newShares = convertToShares(pending);
+                totalShares += newShares;
                 // Mint the shares to the user
-                _mint(user, shares);
+                _mint(user, newShares);
             }
-
-            userQuarterInfo[user][currentQuarter].shares = shares;
-
-            // Update user's rewardDebt = 0, because we have just only processed the previous quarter's rewards
-            // Not the current deposit the user is making or not making, we don't which operation ran!
-            // userInfo.rewardDebt = (userInfo.shares * quarter.accRewardPerShare) / 1e12;
+            // Reset user's data for the processed quarter
+            delete userQuarterInfo[user][i];
         }
+
+        userQuarterInfo[user][currentQuarter].shares = totalShares;
+        userQuarterInfo[user][currentQuarter].lastUpdateTimestamp = block.timestamp;
 
         userLastProcessedQuarter[user] = currentQuarter - 1;
-    }
-
-    function _update(
-        address from,
-        address to,
-        uint256 amount
-    )
-        internal
-        override(ERC20Upgradeable, ERC20VotesUpgradeable)
-    {
-        // Process all previous quarters before the transfer/mint/burn happens
-        if (from != address(0)) {
-            _processPendingRewards(from);
-        }
-
-        if (to != address(0)) {
-            _processPendingRewards(to);
-        }
-
-        // Then perform the transfer/mint/burn
-        super._update(from, to, amount);
-
-        (uint256 currentQuarter,,) = getCurrentQuarter();
-        Quarter storage quarter = quarters[uint256(currentQuarter)];
-
-        // Transfer
-        if (from != address(0) && to != address(0) && from != to) {
-            {
-                UserInfo storage fromUser = userQuarterInfo[from][uint256(currentQuarter)];
-                fromUser.shares -= amount;
-                fromUser.rewardDebt = (fromUser.shares * quarter.accRewardPerShare) / 1e12;
-            }
-
-            {
-                UserInfo storage toUser = userQuarterInfo[to][uint256(currentQuarter)];
-                toUser.shares += amount;
-                toUser.rewardDebt = (toUser.shares * quarter.accRewardPerShare) / 1e12;
-            }
-        }
-
-        // Update voting units for ERC20Votes
-        _transferVotingUnits(from, to, amount);
     }
 
     /// @dev override totalSupply to return the total supply of the token
@@ -403,5 +458,9 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
 
     function decimals() public view virtual override(ERC4626Upgradeable, ERC20Upgradeable) returns (uint8) {
         return super.decimals();
+    }
+
+    function _update(address from, address to, uint256 value) internal virtual override(ERC20VotesUpgradeable, ERC20Upgradeable) {
+        super._update(from, to, value);
     }
 }
