@@ -35,8 +35,8 @@ contract MortarStakingTesting is Test {
     function test_getCurrentQuarter_BeforeStakingPeriod() public {
         vm.warp(1_735_084_799); // 1 second before first quarter starts
 
-        (int256 quarter, uint256 start, uint256 end) = staking.getCurrentQuarter();
-        assertEq(quarter, -1);
+        (uint256 quarter, uint256 start, uint256 end) = staking.getCurrentQuarter();
+        assertEq(quarter, 0);
         assertEq(start, 0);
         assertEq(end, 0);
     }
@@ -44,9 +44,9 @@ contract MortarStakingTesting is Test {
     function test_getCurrentQuarter_FirstQuarter() public {
         vm.warp(1_735_084_800);
 
-        (int256 quarter, uint256 start, uint256 end) = staking.getCurrentQuarter();
+        (uint256 quarter, uint256 start, uint256 end) = staking.getCurrentQuarter();
 
-        assertEq(quarter, 0);
+        assertEq(quarter, 1);
         assertEq(start, 1_735_084_800);
         assertEq(end, 1_742_860_800);
     }
@@ -54,29 +54,29 @@ contract MortarStakingTesting is Test {
     function test_getCurrentQuarter_MiddleOfFirstQuarter() public {
         vm.warp(1_738_972_800);
 
-        (int256 quarter, uint256 start, uint256 end) = staking.getCurrentQuarter();
+        (uint256 quarter, uint256 start, uint256 end) = staking.getCurrentQuarter();
 
-        assertEq(quarter, 1);
+        assertEq(quarter, 2);
         assertEq(start, 1_735_084_800);
         assertEq(end, 1_742_860_800);
     }
 
     function test_getCurrentQuarter_LastQuarter() public {
-        vm.warp(2_358_000_001); 
+        vm.warp(2_358_000_001);
 
-        (int256 quarter, uint256 start, uint256 end) = staking.getCurrentQuarter();
+        (uint256 quarter, uint256 start, uint256 end) = staking.getCurrentQuarter();
 
-        assertEq(quarter, 80);
+        assertEq(quarter, 81);
         assertEq(start, 2_358_000_000);
         assertEq(end, 2_365_420_800);
     }
 
     function test_getCurrentQuarter_AfterStakingPeriod() public {
-        vm.warp(2_365_420_801); 
+        vm.warp(2_365_420_801);
 
-        (int256 quarter, uint256 start, uint256 end) = staking.getCurrentQuarter();
+        (uint256 quarter, uint256 start, uint256 end) = staking.getCurrentQuarter();
 
-        assertEq(quarter, -1);
+        assertEq(quarter, 81);
         assertEq(start, 0);
         assertEq(end, 0);
     }
@@ -84,9 +84,9 @@ contract MortarStakingTesting is Test {
     function test_getCurrentQuarter_ExactQuarterBoundary() public {
         vm.warp(1_735_084_800); // Exact end of Q1/start of Q2
 
-        (int256 quarter, uint256 start, uint256 end) = staking.getCurrentQuarter();
+        (uint256 quarter, uint256 start, uint256 end) = staking.getCurrentQuarter();
 
-        assertEq(quarter, 0);
+        assertEq(quarter, 1);
         assertEq(start, 1_735_084_800);
         assertEq(end, 1_742_860_800);
     }
@@ -94,9 +94,9 @@ contract MortarStakingTesting is Test {
     function test_getCurrentQuarter_MiddleQuarter() public {
         vm.warp(2_050_252_800);
 
-        (int256 quarter, uint256 start, uint256 end) = staking.getCurrentQuarter();
+        (uint256 quarter, uint256 start, uint256 end) = staking.getCurrentQuarter();
 
-        assertEq(quarter, 40);
+        assertEq(quarter, 41);
         assertEq(start, 2_042_832_000);
         assertEq(end, 2_050_252_800);
     }
