@@ -322,30 +322,48 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
     }
 
     /// @dev Binary search to get the current quarter index, start timestamp and end timestamp
-    // Function to get the current quarter index and its start and end timestamps
-    function getCurrentQuarter() public view returns (uint256, uint256, uint256) {
-        uint256 currentTimestamp = block.timestamp;
+    function getCurrentQuarter() public view returns (uint256 index, uint256 start, uint256 end) {
+        uint256[] memory arr = quarterTimestamps;
+        uint256 len = arr.length;
+        uint256 t = block.timestamp;
+
+        if (t < arr[0]) {
+            return (0, 0, 0);
+        }
+
+        if (t > arr[len - 1]) {
+            return (type(uint256).max, 0, 0);
+        }
+
         uint256 low = 0;
-        uint256 high = quarterTimestamps.length - 1;
+        uint256 high = len - 1;
 
         while (low <= high) {
             uint256 mid = (low + high) / 2;
-            uint256 quarterEnd = quarterTimestamps[mid];
-            uint256 quarterStart = mid == 0 ? quarterTimestamps[0] : quarterTimestamps[mid - 1];
-
-            if (currentTimestamp >= quarterStart && currentTimestamp < quarterEnd) {
-                return (mid, quarterStart, quarterEnd);
-            } else if (currentTimestamp < quarterStart) {
-                if (mid == 0) break;
-                high = mid - 1;
-            } else {
+            if (arr[mid] == t) {
+                if (mid == 0) {
+                    return (mid + 1, arr[0], arr[1]);
+                } else {
+                    return (mid + 1, arr[mid - 1], arr[mid]);
+                }
+            } else if (arr[mid] < t) {
                 low = mid + 1;
+            } else {
+                if (mid == 0) {
+                    return (mid + 1, arr[0], arr[1]);
+                }
+                high = mid - 1;
             }
         }
 
-        // If current time is beyond the last quarter, return the last quarter's index and timestamps
-        uint256 lastIndex = quarterTimestamps.length - 1;
-        return (lastIndex, quarterTimestamps[lastIndex - 1], quarterTimestamps[lastIndex]);
+        // After the loop, 'low' is the smallest index such that arr[low] > t
+        if (low == 0) {
+            return (low + 1, arr[0], arr[1]);
+        } else if (low < len) {
+            return (low + 1, arr[low - 1], arr[low]);
+        } else {
+            return (0, 0, 0);
+        }
     }
 
     /// @notice calculate the rewards for the given duration
@@ -355,11 +373,14 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
 
     function balanceOf(address account) public view override(ERC20Upgradeable, IERC20) returns (uint256) {
         uint256 balance = super.balanceOf(account);
-        uint256 totalShares;
         (uint256 currentQuarter,,) = getCurrentQuarter();
+        if (currentQuarter > type(uint256).max || currentQuarter == 0) {
+            return balance;
+        }
+        uint256 totalShares;
         // Calculate the rewards for the user till now
         for (uint256 i = userLastProcessedQuarter[account]; i < currentQuarter; i++) {
-            totalShares += _calculatePendingRewards(account, i);
+            totalShares += convertToShares(_calculatePendingRewards(account, i));
         }
 
         return balance + totalShares;
@@ -368,13 +389,12 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
     function _calculatePendingRewards(address user_, uint256 quarter_) internal view returns (uint256) {
         /// @todo Easy optimization: Merge parts of _calculatePendingRewards and _processPendingRewards()
 
-        (uint256 currentQuarter,,) = getCurrentQuarter();
         UserInfo memory _userInfo = userQuarterInfo[user_][quarter_];
         Quarter memory _quarter = quarters[quarter_];
         uint256 totalReward = _userInfo.rewardAccrued;
         uint256 totalAccRewardPerShare = _quarter.accRewardPerShare;
         /// @todo (quarter_ < currentQuarter) conditional is not needed
-        if (quarter_ < currentQuarter && _quarter.lastUpdateTimestamp < quarterTimestamps[quarter_ + 1]) {
+        if (_quarter.lastUpdateTimestamp < quarterTimestamps[quarter_ + 1]) {
             if (_quarter.totalShares > 0) {
                 uint256 additionalRewards =
                     calculateRewards(_quarter.lastUpdateTimestamp, quarterTimestamps[quarter_ + 1]);
@@ -388,12 +408,14 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
         // (deposit/withdraw) and quarter end timestamp
         totalReward += ((_userInfo.shares * 1e12) / totalAccRewardPerShare) - _userInfo.rewardDebt;
 
-        return convertToShares(totalReward);
+        return totalReward;
     }
 
     function _processPendingRewards(address user) internal {
         uint256 lastProcessedQuarter = userLastProcessedQuarter[user];
         (uint256 currentQuarter,,) = getCurrentQuarter();
+        /// @todo remove this require from here
+        require(currentQuarter != 0 || currentQuarter < type(uint256).max);
         uint256 totalShares;
         for (uint256 i = lastProcessedQuarter; i < currentQuarter; i++) {
             UserInfo storage userInfo = userQuarterInfo[user][i];
@@ -460,7 +482,15 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
         return super.decimals();
     }
 
-    function _update(address from, address to, uint256 value) internal virtual override(ERC20VotesUpgradeable, ERC20Upgradeable) {
+    function _update(
+        address from,
+        address to,
+        uint256 value
+    )
+        internal
+        virtual
+        override(ERC20VotesUpgradeable, ERC20Upgradeable)
+    {
         super._update(from, to, value);
     }
 }
