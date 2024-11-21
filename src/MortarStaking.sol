@@ -315,7 +315,6 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
         require(currentQuarterIndex != 0, "Invalid quarter");
         if (block.timestamp > endTime) return;
 
-        currentQuarterIndex--;
         Quarter storage _quarter = quarters[currentQuarterIndex];
 
         // Initialize with the last processed quarter because we left off from there
@@ -345,46 +344,37 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
     /// @dev Binary search to get the current quarter index, start timestamp and end timestamp
     function getCurrentQuarter() public view returns (uint256 index, uint256 start, uint256 end) {
         uint256[] memory arr = quarterTimestamps;
-        uint256 len = arr.length;
+        uint256 len = arr.length; // len == TOTAL_QUARTERS + 1
         uint256 t = block.timestamp;
 
         if (t < arr[0]) {
-            return (0, 0, 0);
+            return (0, 0, 0); // Before the first quarter
         }
 
-        if (t > arr[len - 1]) {
-            return (arr.length, 0, 0);
+        if (t >= arr[len - 1]) {
+            return (0, 0, 0); // After the last quarter
         }
 
         uint256 low = 0;
-        uint256 high = len - 1;
+        uint256 high = len - 2; // Adjusted to prevent out-of-bounds
 
         while (low <= high) {
             uint256 mid = (low + high) / 2;
-            if (arr[mid] == t) {
-                if (mid == 0) {
-                    return (mid, arr[0], arr[1]);
-                } else {
-                    return (mid, arr[mid - 1], arr[mid]);
-                }
-            } else if (arr[mid] < t) {
-                low = mid;
-            } else {
-                if (mid == 0) {
-                    return (mid, arr[0], arr[1]);
-                }
+
+            if (t >= arr[mid] && t < arr[mid + 1]) {
+                // Found the quarter
+                index = mid + 1; // Quarters are 1-indexed
+                start = arr[mid];
+                end = arr[mid + 1];
+                return (index, start, end);
+            } else if (t < arr[mid]) {
                 high = mid - 1;
+            } else {
+                low = mid + 1;
             }
         }
 
-        // After the loop, 'low' is the smallest index such that arr[low] > t
-        if (low == 0) {
-            return (low + 1, arr[0], arr[1]);
-        } else if (low < len) {
-            return (low + 1, arr[low - 1], arr[low]);
-        } else {
-            return (0, 0, 0);
-        }
+        return (0, 0, 0); // Not found
     }
 
     /// @notice calculate the rewards for the given duration
@@ -474,7 +464,7 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
         // Actual Minted Supply + (Reward to Supply)
         uint256 supply = super.totalSupply();
         (uint256 currentQuarter,, uint256 endTimestamp) = getCurrentQuarter();
-        if (currentQuarter-- == 0) return supply;
+        if (currentQuarter == 0) return supply;
         // Calculate each quarter's rewards, convert them to shares and add them to the total supply
         for (uint256 i = lastProcessedQuarter; i < currentQuarter && lastProcessedQuarter != 0;) {
             /// @todo Check if shares exists after the last action, then calculate the rewards

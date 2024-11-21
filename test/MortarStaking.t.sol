@@ -65,7 +65,7 @@ contract MortarStakingTesting is Test {
         // Case 2: First quarter
         vm.warp(1_735_084_800);
         (quarter, start, end) = staking.getCurrentQuarter();
-        assertEq(quarter, 0, "First quarter: incorrect quarter");
+        assertEq(quarter, 1, "First quarter: incorrect quarter");
         assertEq(start, 1_735_084_800, "First quarter: incorrect start");
         assertEq(end, 1_742_860_800, "First quarter: incorrect end");
 
@@ -79,9 +79,9 @@ contract MortarStakingTesting is Test {
         // Case 4: Middle quarter
         vm.warp(2_050_252_800);
         (quarter, start, end) = staking.getCurrentQuarter();
-        assertEq(quarter, 40, "Middle quarter: incorrect quarter");
-        assertEq(start, 2_042_832_000, "Middle quarter: incorrect start");
-        assertEq(end, 2_050_252_800, "Middle quarter: incorrect end");
+        assertEq(quarter, 41, "Middle quarter: incorrect quarter");
+        assertEq(start, 2_050_252_800, "Middle quarter: incorrect start");
+        assertEq(end, 2_058_028_800, "Middle quarter: incorrect end");
 
         // Case 5: Last quarter
         vm.warp(2_358_000_001);
@@ -93,7 +93,7 @@ contract MortarStakingTesting is Test {
         // Case 6: After staking period
         vm.warp(2_365_420_801);
         (quarter, start, end) = staking.getCurrentQuarter();
-        assertEq(quarter, 80, "After staking period: incorrect quarter");
+        assertEq(quarter, 0, "After staking period: incorrect quarter");
         assertEq(start, 0, "After staking period: incorrect start");
         assertEq(end, 0, "After staking period: incorrect end");
 
@@ -122,8 +122,7 @@ contract MortarStakingTesting is Test {
         uint256 aliceBalance = staking.balanceOf(alice);
         assertEq(aliceBalance, 100 ether, "Alice's initial deposit failed");
 
-        (,,, uint256 shares) = staking.userQuarterInfo(alice, 2);
-
+        (,,, uint256 shares) = staking.userQuarterInfo(alice, 1);
         // Log state after first deposit
         (currentQuarter, start, end) = staking.getCurrentQuarter();
     }
