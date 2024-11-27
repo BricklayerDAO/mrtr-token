@@ -37,7 +37,7 @@ contract MRTRTokenTest is Test {
         token = MRTRToken(address(proxy));
     }
 
-    function test_InitialSetup() public {
+    function test_InitialSetup() public view {
         // Test token metadata
         assertEq(token.name(), "Mortar");
         assertEq(token.symbol(), "MRTR");
