@@ -1,3 +1,5 @@
+// TODO: Does this match the expected quarters? 
+// values here change depending on the intial values
 const dateOffsets = [
   { month: 11, day: 25 }, // December 25
   { month: 2, day: 25 },  // March 25
