@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import "forge-std/console.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { ERC4626Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
@@ -14,7 +13,7 @@ import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
     uint256 private constant TOTAL_REWARDS = 450_000_000 ether;
     uint256 private constant TOTAL_QUARTERS = 80;
-    uint256 rewardRate;
+    uint256 public rewardRate;
     mapping(address => uint256) public rewardDebt;
 
     struct Quarter {
@@ -44,14 +43,6 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
 
     uint256[] public quarterTimestamps;
 
-    modifier isStakeValid() {
-        require(
-            block.timestamp >= quarterTimestamps[0] && block.timestamp <= quarterTimestamps[TOTAL_QUARTERS],
-            "Staking is not allowed outside the staking period"
-        );
-        _;
-    }
-
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
@@ -61,6 +52,9 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
         __ERC4626_init(_asset);
         __ERC20_init("XMortar", "xMRTR");
         __ERC20Votes_init();
+
+        // Quarter is open set of the time period
+        // E.g., (1_735_084_800 + 1) to (1_742_860_800 - 1) is first quarter
         quarterTimestamps = [
             1_735_084_800, // Quarter 1 start
             1_742_860_800, // Quarter 1 end
@@ -149,129 +143,130 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
         rewardRate = TOTAL_REWARDS / totalDuration;
     }
 
-    function deposit(uint256 assets, address receiver) public override isStakeValid returns (uint256) {
+    function deposit(uint256 assets, address receiver) public override returns (uint256) {
+        (bool isValid, uint256 currentQuarter,, uint256 endTime) = getCurrentQuarter();
+        require(isValid, "Invalid staking period");
         // Validation
         require(assets > 0, "Cannot stake 0");
         require(receiver != address(0), "Cannot stake to the zero address");
         // Update current quarter
-        _updateQuarter();
+        _updateQuarter(currentQuarter, endTime);
 
         // Process rewards -> shares for all previous quarters for the user
-        _processPendingRewards(receiver);
+        _processPendingRewards(receiver, currentQuarter);
 
         // Deposit the assets
         uint256 shares = super.deposit(assets, receiver);
         // Update the user info
-        _afterDepositOrMint(assets, shares, receiver);
+        _afterDepositOrMint(assets, shares, receiver, currentQuarter);
 
         return shares;
     }
 
-    function mint(uint256 shares, address receiver) public override isStakeValid returns (uint256) {
+    function mint(uint256 shares, address receiver) public override returns (uint256) {
+        (bool isValid, uint256 currentQuarter,, uint256 endTime) = getCurrentQuarter();
+        require(isValid, "Invalid staking period");
         // Validation
         require(shares > 0, "Cannot mint 0");
         require(receiver != address(0), "Cannot mint to the zero address");
         // Update current quarter
-        _updateQuarter();
+        _updateQuarter(currentQuarter, endTime);
         // Process rewards -> shares for all previous quarters for the user
-        _processPendingRewards(receiver);
+        _processPendingRewards(receiver, currentQuarter);
         // Update the user info
         // Deposit the assets
         uint256 assets = super.mint(shares, receiver);
         /// @todo Reentrancy
-        _afterDepositOrMint(assets, shares, receiver);
+        _afterDepositOrMint(assets, shares, receiver, currentQuarter);
 
         return assets;
     }
 
-    function _afterDepositOrMint(uint256 assets, uint256 shares, address receiver) private {
-        (uint256 currentQuarter,,) = getCurrentQuarter();
-        UserInfo memory _userInfo = userQuarterInfo[receiver][currentQuarter];
-        Quarter memory _quarter = quarters[currentQuarter];
-        // Update user shares
-        _userInfo.shares += shares;
-        // Update user reward debt
-        _userInfo.rewardDebt = (_userInfo.shares * _quarter.accRewardPerShare) / 1e18;
-        uint256 rewardAccrued = _calculatePendingRewards(receiver, currentQuarter);
+    function _afterDepositOrMint(uint256 assets, uint256 shares, address receiver, uint256 currentQuarter) private {
+        UserInfo storage _userInfo = userQuarterInfo[receiver][currentQuarter];
+        Quarter storage _quarter = quarters[currentQuarter];
+        uint256 rewardAccrued = Math.mulDiv(_userInfo.shares, _quarter.accRewardPerShare, 1e18) - _userInfo.rewardDebt;
         // Process reward
         _userInfo.rewardAccrued += rewardAccrued;
         _quarter.totalRewardAccrued += rewardAccrued;
-
+        // Update user shares
+        _userInfo.shares += shares;
+        // Update user reward debt
+        _userInfo.rewardDebt = Math.mulDiv(_userInfo.shares, _quarter.accRewardPerShare, 1e18);
         // Update the last update time
         _userInfo.lastUpdateTimestamp = block.timestamp;
 
         // Update quarter totals
         _quarter.totalShares += shares;
         _quarter.totalStaked += assets;
-
-        // Save the updated user and quarter data
-        userQuarterInfo[receiver][currentQuarter] = _userInfo;
-        quarters[currentQuarter] = _quarter;
     }
 
     function withdraw(uint256 assets, address receiver, address owner) public override returns (uint256) {
         // Validation
+        (bool isValid, uint256 currentQuarter,, uint256 endTime) = getCurrentQuarter();
+        require(isValid, "Invalid staking period");
         require(assets > 0, "Cannot withdraw 0");
         require(receiver != address(0), "Cannot withdraw to the zero address");
         // Update current quarter
-        _updateQuarter();
+        _updateQuarter(currentQuarter, endTime);
         // Process rewards -> shares for all previous quarters for the user
-        _processPendingRewards(owner);
+
+        _processPendingRewards(owner, currentQuarter);
+
         // Update the user info
         // Withdraw the assets
+
         uint256 shares = super.withdraw(assets, receiver, owner);
         /// @todo Reentrancy
-        _afterWithdrawOrRedeem(assets, shares, owner);
-
+        _afterWithdrawOrRedeem(assets, shares, owner, currentQuarter);
         return shares;
     }
 
     function redeem(uint256 shares, address receiver, address owner) public override returns (uint256) {
         // Validation
+        (bool isValid, uint256 currentQuarter,, uint256 endTime) = getCurrentQuarter();
+        require(isValid, "Invalid staking period");
         require(shares > 0, "Cannot redeem 0");
         require(receiver != address(0), "Cannot redeem to the zero address");
         // Update current quarter
-        _updateQuarter();
+        _updateQuarter(currentQuarter, endTime);
         // Process rewards -> shares for all previous quarters for the user
-        _processPendingRewards(owner);
+        _processPendingRewards(owner, currentQuarter);
         // Update the user info
         // Redeem the assets
         uint256 assets = super.redeem(shares, receiver, owner);
-        _afterWithdrawOrRedeem(assets, shares, owner);
+        _afterWithdrawOrRedeem(assets, shares, owner, currentQuarter);
 
         return assets;
     }
 
-    function _afterWithdrawOrRedeem(uint256 assets, uint256 shares, address owner) private {
-        (uint256 currentQuarter,,) = getCurrentQuarter();
-        UserInfo memory _userInfo = userQuarterInfo[owner][currentQuarter];
-        Quarter memory _quarter = quarters[currentQuarter];
+    function _afterWithdrawOrRedeem(uint256 assets, uint256 shares, address owner, uint256 currentQuarter) private {
+        UserInfo storage _userInfo = userQuarterInfo[owner][currentQuarter];
+        Quarter storage _quarter = quarters[currentQuarter];
         // Update user shares
-        _userInfo.shares -= shares;
         // Process reward
-        uint256 rewardsAccrued = _calculatePendingRewards(owner, currentQuarter);
+        uint256 rewardsAccrued = Math.mulDiv(_userInfo.shares, _quarter.accRewardPerShare, 1e18) - _userInfo.rewardDebt;
+        _userInfo.shares -= shares;
         _userInfo.rewardAccrued += rewardsAccrued;
         _quarter.totalRewardAccrued += rewardsAccrued;
         // Update last update time
         _userInfo.lastUpdateTimestamp = block.timestamp;
         // Update user reward debt
-        _userInfo.rewardDebt = (_userInfo.shares * _quarter.accRewardPerShare) / 1e18;
+        _userInfo.rewardDebt = Math.mulDiv(_userInfo.shares, _quarter.accRewardPerShare, 1e18);
         // Update _quarter totals
         _quarter.totalShares -= shares;
         _quarter.totalStaked -= assets;
-
-        // Save the updated user and quarter data
-        userQuarterInfo[owner][currentQuarter] = _userInfo;
-        quarters[currentQuarter] = _quarter;
     }
 
     function transfer(address to, uint256 amount) public virtual override(ERC20Upgradeable, IERC20) returns (bool) {
-        _updateQuarter();
-        _processPendingRewards(msg.sender);
-        _processPendingRewards(to);
+        (bool isValid, uint256 currentQuarter,, uint256 endTime) = getCurrentQuarter();
+        require(isValid, "Invalid staking period");
+        _updateQuarter(currentQuarter, endTime);
+        _processPendingRewards(msg.sender, currentQuarter);
+        _processPendingRewards(to, currentQuarter);
         bool success = super.transfer(to, amount);
         // Update the current quarter's UserInfo
-        _afterTransfer(msg.sender, to, amount);
+        _afterTransfer(msg.sender, to, amount, currentQuarter);
         return success;
     }
 
@@ -285,96 +280,119 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
         override(ERC20Upgradeable, IERC20)
         returns (bool)
     {
-        _updateQuarter();
-        _processPendingRewards(from);
-        _processPendingRewards(to);
+        (bool isValid, uint256 currentQuarter,, uint256 endTime) = getCurrentQuarter();
+        require(isValid, "Invalid staking period");
+        _updateQuarter(currentQuarter, endTime);
+        _processPendingRewards(from, currentQuarter);
+        _processPendingRewards(to, currentQuarter);
         bool success = super.transferFrom(from, to, amount);
         // Update the current quarter's UserInfo
-        _afterTransfer(from, to, amount);
+        _afterTransfer(from, to, amount, currentQuarter);
         return success;
     }
 
-    function _afterTransfer(address from, address to, uint256 amount) internal {
-        (uint256 currentQuarter,,) = getCurrentQuarter();
+    function _afterTransfer(address from, address to, uint256 amount, uint256 currentQuarter) internal {
         Quarter storage quarter = quarters[currentQuarter];
 
         // Update sender's shares
         UserInfo storage senderInfo = userQuarterInfo[from][currentQuarter];
         senderInfo.shares -= amount;
-        senderInfo.rewardDebt = (senderInfo.shares * quarter.accRewardPerShare) / 1e18;
+        senderInfo.rewardDebt = Math.mulDiv(senderInfo.shares, quarter.accRewardPerShare, 1e18);
 
         // Update recipient's shares
         UserInfo storage recipientInfo = userQuarterInfo[to][currentQuarter];
         recipientInfo.shares += amount;
-        recipientInfo.rewardDebt = (recipientInfo.shares * quarter.accRewardPerShare) / 1e18;
+        recipientInfo.rewardDebt = Math.mulDiv(recipientInfo.shares, quarter.accRewardPerShare, 1e18);
     }
 
-    function _updateQuarter() internal {
-        /// @todo Change the quarter index everywhere because now the quarter we get is +1
-        (uint256 currentQuarterIndex,, uint256 endTime) = getCurrentQuarter();
-        require(currentQuarterIndex != 0, "Invalid quarter");
+    function _updateQuarter(uint256 currentQuarterIndex, uint256 endTime) internal {
         if (block.timestamp > endTime) return;
 
         Quarter storage _quarter = quarters[currentQuarterIndex];
 
         // Initialize with the last processed quarter because we left off from there
         uint256 totalShares = quarters[lastProcessedQuarter].totalShares;
+        uint256 totalStaked = quarters[lastProcessedQuarter].totalStaked;
         // Process previous quarters and calculate total shares, in order to calculate the rewards for the current
         // quarter
         for (uint256 i = lastProcessedQuarter; i < currentQuarterIndex;) {
-            uint256 rewardsAfterLastAction = calculateRewards(quarters[i].lastUpdateTimestamp, endTime);
-            totalShares += quarters[i].totalShares + convertToShares(rewardsAfterLastAction);
+            Quarter storage pastQuarter = quarters[i];
+            uint256 quarterEndTime = quarterTimestamps[i + 1];
+
+            // 1. Calculate rewards accrued since the last update to the end of the quarter
+            uint256 rewardsAccrued = calculateRewards(pastQuarter.lastUpdateTimestamp, quarterEndTime);
+            pastQuarter.totalRewardAccrued += rewardsAccrued;
+
+            // 2. Calculate accRewardPerShare BEFORE updating totalShares to prevent dilution
+            if (pastQuarter.totalShares > 0) {
+                pastQuarter.accRewardPerShare =
+                    Math.mulDiv(pastQuarter.totalRewardAccrued, 1e18, pastQuarter.totalShares);
+            } else {
+                pastQuarter.accRewardPerShare = 0;
+            }
+
+            // 3. Convert rewards to shares based on the current totalShares and totalStaked
+            if (totalStaked > 0) {
+                uint256 newShares = calculateSharesFromRewards(pastQuarter.totalRewardAccrued, totalShares, totalStaked);
+
+                // 4. Update totalShares and totalStaked with the new shares and rewards
+                totalShares += newShares;
+                totalStaked += rewardsAccrued;
+
+                quarters[i + 1].totalShares = totalShares;
+                quarters[i + 1].totalStaked = totalStaked;
+            }
+
+            pastQuarter.lastUpdateTimestamp = quarterEndTime;
+            quarters[i + 1].lastUpdateTimestamp = quarterEndTime;
             unchecked {
                 i++;
             }
         }
 
-        // Update the accRewardPerShare for the quarter
-        if (totalShares > 0) {
+        // Update the accRewardPerShare for the current quarter
+        if (_quarter.totalShares > 0) {
             uint256 rewards = calculateRewards(_quarter.lastUpdateTimestamp, block.timestamp);
-            _quarter.accRewardPerShare += (rewards * totalShares) / 1e18;
+            _quarter.accRewardPerShare += Math.mulDiv(rewards, 1e18, _quarter.totalShares);
         }
 
         // current quarter updates
-        lastProcessedQuarter = currentQuarterIndex;
-        _quarter.totalShares += totalShares;
+        lastProcessedQuarter = lastProcessedQuarter < currentQuarterIndex ? lastProcessedQuarter : currentQuarterIndex;
         _quarter.lastUpdateTimestamp = block.timestamp;
     }
 
     /// @dev Binary search to get the current quarter index, start timestamp and end timestamp
-    function getCurrentQuarter() public view returns (uint256 index, uint256 start, uint256 end) {
-        uint256[] memory arr = quarterTimestamps;
-        uint256 len = arr.length; // len == TOTAL_QUARTERS + 1
-        uint256 t = block.timestamp;
+    function getCurrentQuarter() public view returns (bool valid, uint256 index, uint256 start, uint256 end) {
+        uint256 timestamp = block.timestamp;
+        uint256 left = 0;
+        uint256 right = quarterTimestamps.length - 1;
 
-        if (t < arr[0]) {
-            return (0, 0, 0); // Before the first quarter
-        }
-
-        if (t >= arr[len - 1]) {
-            return (0, 0, 0); // After the last quarter
-        }
-
-        uint256 low = 0;
-        uint256 high = len - 2; // Adjusted to prevent out-of-bounds
-
-        while (low <= high) {
-            uint256 mid = (low + high) / 2;
-
-            if (t >= arr[mid] && t < arr[mid + 1]) {
-                // Found the quarter
-                index = mid + 1; // Quarters are 1-indexed
-                start = arr[mid];
-                end = arr[mid + 1];
-                return (index, start, end);
-            } else if (t < arr[mid]) {
-                high = mid - 1;
+        // Binary search implementation
+        while (left < right) {
+            uint256 mid = (left + right) / 2;
+            if (timestamp < quarterTimestamps[mid]) {
+                right = mid;
             } else {
-                low = mid + 1;
+                left = mid + 1;
             }
         }
 
-        return (0, 0, 0); // Not found
+        // Check if we're in a valid staking period
+        if (timestamp >= quarterTimestamps[0] && timestamp < quarterTimestamps[quarterTimestamps.length - 1]) {
+            uint256 quarterIndex = left > 0 ? left - 1 : 0;
+            return (true, quarterIndex, quarterTimestamps[quarterIndex], quarterTimestamps[quarterIndex + 1]);
+        }
+
+        if (timestamp >= quarterTimestamps[quarterTimestamps.length - 1]) {
+            return (
+                false,
+                quarterTimestamps.length - 2,
+                quarterTimestamps[quarterTimestamps.length - 2],
+                quarterTimestamps[quarterTimestamps.length - 1]
+            );
+        }
+
+        return (false, 0, 0, 0);
     }
 
     /// @notice calculate the rewards for the given duration
@@ -383,73 +401,76 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
         return rewards;
     }
 
+    /// No need to write a loop. You use the same `totalShares` and `totalStaked` from last action
+    /// and use those over the quarters. Use a formula instead to calculate the rewards and then the shares.
     function balanceOf(address account) public view override(ERC20Upgradeable, IERC20) returns (uint256) {
         uint256 balance = super.balanceOf(account);
-        (uint256 currentQuarter,,) = getCurrentQuarter();
-        if (currentQuarter == 0) return balance;
-        uint256 totalShares;
-        // Calculate the rewards for the user till now
-        for (uint256 i = userLastProcessedQuarter[account]; i < currentQuarter; i++) {
-            totalShares += convertToShares(_calculatePendingRewards(account, i));
+        (bool isValid, uint256 currentQuarter, uint256 startTimestamp,) = getCurrentQuarter();
+        // Step 1: Start from lastProcessed quarter where the user did the last action
+        uint256 userLastProcessed = userLastProcessedQuarter[account];
+        if (!isValid || userLastProcessed == currentQuarter) return balance;
+        uint256 processedQuarter = lastProcessedQuarter;
+        // Step 1: Run a loop to process the user rewards from the user's last processed quarter to the quarter's last
+        // processed quarter
+        for (uint256 i = userLastProcessed; i < processedQuarter && processedQuarter != 0; i++) {
+            UserInfo memory userInfo = userQuarterInfo[account][i];
+            Quarter memory quarter = quarters[i];
+
+            uint256 accumulatedReward = Math.mulDiv(userInfo.shares, quarter.accRewardPerShare, 1e18);
+            uint256 pending = userInfo.rewardAccrued + accumulatedReward - userInfo.rewardDebt;
+
+            if (pending > 0) {
+                uint256 newShares = calculateSharesFromRewards(pending, quarter.totalShares, quarter.totalStaked);
+                balance += newShares;
+            }
         }
 
-        return balance + totalShares;
+        // Step 2: From the there on to the current quarter calculate the rewards and shares without loop
+        uint256 totalRewards = calculateRewards(quarters[processedQuarter].lastUpdateTimestamp, startTimestamp);
+
+        uint256 accRewardPerShares = quarters[processedQuarter].accRewardPerShare
+            + Math.mulDiv(totalRewards, 1e18, quarters[processedQuarter].totalShares);
+
+        balance += Math.mulDiv(accRewardPerShares, balance, 1e18);
+
+        return balance;
     }
 
-    function _calculatePendingRewards(address user_, uint256 quarter_) internal view returns (uint256) {
-        /// @todo Easy optimization: Merge parts of _calculatePendingRewards and _processPendingRewards()
-
-        UserInfo memory _userInfo = userQuarterInfo[user_][quarter_];
-        Quarter memory _quarter = quarters[quarter_];
-        uint256 totalReward = _userInfo.rewardAccrued;
-        uint256 totalAccRewardPerShare = _quarter.accRewardPerShare;
-        // Updating the to `totalAccRewardPerShare` only if there was stakes in the contract after the last user action
-        if (_quarter.totalShares > 0) {
-            uint256 additionalRewards = calculateRewards(_userInfo.lastUpdateTimestamp, quarterTimestamps[quarter_ + 1]);
-            totalAccRewardPerShare += (additionalRewards * _quarter.totalShares) / 1e18;
-        } else {
-            totalAccRewardPerShare = _quarter.accRewardPerShare;
-        }
-
-        // Calculated the total reward and the shares from those rewards, between the time of last user action
-        // (deposit/withdraw) and quarter end timestamp
-        totalReward += ((_userInfo.shares * totalAccRewardPerShare) / 1e18) - _userInfo.rewardDebt;
-
-        return totalReward;
+    function calculateSharesFromRewards(
+        uint256 rewards,
+        uint256 shares,
+        uint256 staked
+    )
+        private
+        pure
+        returns (uint256)
+    {
+        if (staked == 0) return 0;
+        return Math.mulDiv(rewards, shares, staked);
     }
 
     // Convert the rewards to shares
-    function _processPendingRewards(address user) internal {
+    function _processPendingRewards(address user, uint256 currentQuarter) internal {
         uint256 lastProcessed = userLastProcessedQuarter[user];
-        (uint256 currentQuarter,,) = getCurrentQuarter();
-        uint256 totalShares;
+        uint256 totalShares = userQuarterInfo[user][lastProcessed].shares;
+
         for (uint256 i = lastProcessed; i < currentQuarter; i++) {
             UserInfo storage userInfo = userQuarterInfo[user][i];
             Quarter storage quarter = quarters[i];
+            // Calculate the pending rewards: There is precision error of 1e-18
+            uint256 accumulatedReward = Math.mulDiv(userInfo.shares, quarter.accRewardPerShare, 1e18);
 
-            uint256 endTimestamp = quarterTimestamps[i + 1];
-            // Step 1: Update Quarter Data
-            // Update epoch accRewardPerShare up to the end of the epoch if not done
-            if (quarter.lastUpdateTimestamp < endTimestamp) {
-                uint256 rewards = calculateRewards(quarter.lastUpdateTimestamp, endTimestamp);
-                quarter.accRewardPerShare += (rewards * quarter.totalShares) / 1e18;
-                /// @todo check division by zero
-                quarter.lastUpdateTimestamp = endTimestamp;
-            }
-
-            // Step 2: Calculate the pending rewards
-            uint256 accumulatedReward = (userInfo.shares * quarter.accRewardPerShare) / 1e18;
             uint256 pending = userQuarterInfo[user][i].rewardAccrued + accumulatedReward - userInfo.rewardDebt;
 
             if (pending > 0) {
                 // Convert the pending rewards to shares
-                uint256 newShares = convertToShares(pending);
+                uint256 newShares = calculateSharesFromRewards(pending, totalShares, quarter.totalStaked);
                 totalShares += newShares;
                 // Mint the shares to the user
                 _mint(user, newShares);
             }
 
-            // Reset user's data for the processed quarter
+            // Reset user's data for thran loop processed quarter
             delete userQuarterInfo[user][i];
         }
 
@@ -463,8 +484,8 @@ contract MortarStaking is ERC4626Upgradeable, ERC20VotesUpgradeable {
     function totalSupply() public view override(ERC20Upgradeable, IERC20) returns (uint256) {
         // Actual Minted Supply + (Reward to Supply)
         uint256 supply = super.totalSupply();
-        (uint256 currentQuarter,, uint256 endTimestamp) = getCurrentQuarter();
-        if (currentQuarter == 0) return supply;
+        (bool isValid, uint256 currentQuarter,, uint256 endTimestamp) = getCurrentQuarter();
+        if (!isValid) return supply;
         // Calculate each quarter's rewards, convert them to shares and add them to the total supply
         for (uint256 i = lastProcessedQuarter; i < currentQuarter && lastProcessedQuarter != 0;) {
             /// @todo Check if shares exists after the last action, then calculate the rewards
