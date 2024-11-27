@@ -183,8 +183,15 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
 
     /**
      * @dev Internal function to handle staking logic for deposit and mint.
+     * TODO: Not a big fan of this function I prefer duplicating the logic in this case
+     *    1. checks
+     *    2. Quarter update & pernding reward
+     *    3. mint / deposit logic
+     *    4. after stake
+     *    5. return
      */
     function _stake(uint256 assets, uint256 shares, address receiver, bool isDeposit) internal returns (uint256) {
+        // TODO: I think it looks better just to do the zero check in deposit and mint functions
         if ((isDeposit && assets == 0) || (!isDeposit && shares == 0)) revert CannotStakeZero();
         if (receiver == address(0)) revert ZeroAddress();
 
@@ -198,11 +205,11 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         if (isDeposit) {
             result = super.deposit(assets, receiver);
             shares = result;
-            assets = assets;
+            assets = assets; // TODO; not needed
         } else {
             result = super.mint(shares, receiver);
             assets = result;
-            shares = shares;
+            shares = shares; // TODO; not needed
         }
 
         _afterStake(assets, shares, receiver, currentQuarter);
@@ -308,8 +315,9 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         nonReentrant
         returns (bool)
     {
+        // TODO: _msgSender()
         _transferTokens(msg.sender, to, amount);
-        return true;
+        return true; // TODO: Always?
     }
 
     /**
@@ -328,6 +336,7 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         _transferTokens(from, to, amount);
         uint256 currentAllowance = allowance(from, msg.sender);
         if (currentAllowance < amount) revert ZeroAddress();
+        // TODO: What is this????? it should not be needed
         _approve(from, msg.sender, currentAllowance - amount);
         return true;
     }
@@ -345,8 +354,8 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         _processPendingRewards(from, currentQuarter);
         _processPendingRewards(to, currentQuarter);
 
-        _afterTransfer(from, to, amount, currentQuarter);
-        super.transfer(to, amount);
+        _afterTransfer(from, to, amount, currentQuarter); // TODO: Doesn't happen completely after the transfer
+        super.transfer(to, amount); // TODO: Maybe use transferFrom instead and this remove the _approve that you have above
     }
 
     /**
@@ -355,6 +364,7 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
     function _afterTransfer(address from, address to, uint256 amount, uint256 currentQuarter) internal {
         Quarter storage quarter = quarters[currentQuarter];
 
+        // TODO: Why no rewardAccured update like in the other afterSomething functions?
         UserInfo storage senderInfo = userQuarterInfo[from][currentQuarter];
         senderInfo.shares -= amount;
         senderInfo.rewardDebt = Math.mulDiv(senderInfo.shares, quarter.accRewardPerShare, PRECISION);
@@ -379,19 +389,19 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
             uint256 rewardsAccrued = calculateRewards(pastQuarter.lastUpdateTimestamp, quarterEndTime);
             pastQuarter.totalRewardAccrued += rewardsAccrued;
 
-            console.log("_updateQuarter %s: %s", i, rewardsAccrued);
+            console.log("_updateQuarter %s: %s", i, rewardsAccrued); // TODO: Remember to remove at the end
             // 2. Calculate accRewardPerShare BEFORE updating totalShares to prevent dilution
             if (pastQuarter.totalShares > 0) {
                 pastQuarter.accRewardPerShare =
                     Math.mulDiv(pastQuarter.totalRewardAccrued, PRECISION, pastQuarter.totalShares);
-                console.log("_updateQuarter %s: %s", i, pastQuarter.accRewardPerShare);
+                console.log("_updateQuarter %s: %s", i, pastQuarter.accRewardPerShare); // TODO: Remember to remove at the end
             } else {
-                console.log("_updateQuarter %s: %s", i, 0);
-                pastQuarter.accRewardPerShare = 0;
+                console.log("_updateQuarter %s: %s", i, 0); // TODO: Remember to remove at the end
+                pastQuarter.accRewardPerShare = 0; // TODO: Is this needed?
             }
 
             // 3. Convert rewards to shares based on the current totalShares and totalStaked
-            if (pastQuarter.totalStaked > 0) {
+            if (pastQuarter.totalStaked > 0) { // TODO: Second time checking this, notice there is no change in the value, should you merge the ifs or fix something?
                 uint256 newShares = calculateSharesFromRewards(
                     pastQuarter.totalRewardAccrued, pastQuarter.totalShares, pastQuarter.totalStaked
                 );
@@ -414,6 +424,7 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         }
 
         // current quarter updates
+        // TODO: you should set currentQuarterIndex directly I would say, can it be greater?
         lastProcessedQuarter = lastProcessedQuarter < currentQuarterIndex ? lastProcessedQuarter : currentQuarterIndex;
         _quarter.lastUpdateTimestamp = block.timestamp;
     }
@@ -425,6 +436,9 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         uint256 right = quarterTimestamps.length - 1;
 
         // Binary search implementation
+        // TODO: Binary search is nice for finding a quarter given a timestamp
+        // but not that efficient for getting the current one.
+        // I would have a variable indicating the current one, and will increase the value iterating until finding the current one
         while (left < right) {
             uint256 mid = (left + right) / 2;
             if (timestamp < quarterTimestamps[mid]) {
@@ -483,7 +497,7 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
             }
         }
 
-        // Step 2: From the there on to the current quarter calculate the rewards and shares without loop
+        // Step 2: From the there on to the current quarter calculate the rewards and shares without loop // TODO: Fix comment
         uint256 totalRewards = calculateRewards(quarters[processedQuarter].lastUpdateTimestamp, startTimestamp);
         uint256 accRewardPerShares = quarters[processedQuarter].accRewardPerShare
             + Math.mulDiv(totalRewards, PRECISION, quarters[processedQuarter].totalShares);
@@ -511,7 +525,7 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         uint256 lastProcessed = userLastProcessedQuarter[user];
         uint256 totalShares = userQuarterInfo[user][lastProcessed].shares;
 
-        for (uint256 i = lastProcessed; i < currentQuarter; i++) {
+        for (uint256 i = lastProcessed; i < currentQuarter; i++) { 
             UserInfo storage userInfo = userQuarterInfo[user][i];
             Quarter storage quarter = quarters[i];
             // Calculate the pending rewards: There is precision error of 1e-18
@@ -527,7 +541,7 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
             }
 
             // Reset user's data for thran loop processed quarter
-            delete userQuarterInfo[user][i];
+            delete userQuarterInfo[user][i]; // TODO: nothing is needed anymore?
         }
 
         userQuarterInfo[user][currentQuarter].shares = totalShares;
@@ -543,8 +557,9 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         (bool isValid, uint256 currentQuarter,, uint256 endTimestamp) = getCurrentQuarter();
         if (!isValid) return supply;
         // Calculate each quarter's rewards, convert them to shares and add them to the total supply
+        // TODO: Check lastProcessedQuarter != 0 outside of the for
         for (uint256 i = lastProcessedQuarter; i < currentQuarter && lastProcessedQuarter != 0;) {
-            /// @todo Check if shares exists after the last action, then calculate the rewards
+            /// @todo Check if shares exists after the last action, then calculate the rewards // TODO: Unresolved?
             uint256 rewardsAfterLastAction = calculateRewards(quarters[i].lastUpdateTimestamp, endTimestamp);
             supply += Math.mulDiv(rewardsAfterLastAction, quarters[i].totalShares, quarters[i].totalStaked);
             unchecked {
