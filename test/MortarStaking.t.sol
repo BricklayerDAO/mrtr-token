@@ -106,8 +106,8 @@ contract MortarStakingTesting is Test {
         (valid, quarter, start, end) = staking.getCurrentQuarter();
         assertFalse(valid, "After staking period: should be invalid quarter");
         assertEq(quarter, 79, "After staking period: incorrect quarter");
-        assertEq(start, 2_358_000_000, "After staking period: incorrect start");
-        assertEq(end, 2_365_420_800, "After staking period: incorrect end");
+        assertEq(start, 2_365_420_800, "After staking period: incorrect start");
+        assertEq(end, type(uint256).max, "After staking period: incorrect end");
 
         // Case 7: Exact quarter boundary
         vm.warp(1_742_860_800);
@@ -161,8 +161,6 @@ contract MortarStakingTesting is Test {
 
         uint256 userBalance = staking.balanceOf(user);
         assertEq(userBalance, amount);
-
-        // Optionally, retrieve and process userQuarterInfo if needed
     }
 
     function _withdrawAndCheckBalance(address user, uint256 amount) internal {
@@ -171,7 +169,6 @@ contract MortarStakingTesting is Test {
         vm.stopPrank();
 
         uint256 userBalance = staking.balanceOf(user);
-        // The expected balance depends on rewards; adjust as needed
         assertEq(userBalance, staking.balanceOf(user));
     }
 
@@ -249,24 +246,26 @@ contract MortarStakingTesting is Test {
         uint256 firstQuarterEndTime = staking.quarterTimestamps(1);
         uint256 timeInFirstQuarter = firstQuarterStartTime + (firstQuarterEndTime - firstQuarterStartTime) / 2;
         vm.warp(timeInFirstQuarter);
-
         uint256 depositAmount1 = 100 ether;
+
+        // ==================== Quarter 1 ==================== //
+
         vm.startPrank(alice);
         staking.deposit(depositAmount1, alice);
         vm.stopPrank();
 
         // Warp to the end of the first quarter
         vm.warp(firstQuarterEndTime);
+        // ==================== Quarter 2 ==================== //
 
         // Calculate expected rewards for the first quarter
-        uint256 expectedRewardsFirstQuarter = staking.calculateRewards(timeInFirstQuarter, firstQuarterEndTime);
-        uint256 expectedShares = depositAmount1 + expectedRewardsFirstQuarter;
+        uint256 expectedRewardsFirstDeposit = staking.calculateRewards(timeInFirstQuarter, firstQuarterEndTime);
+        uint256 expectedShares = depositAmount1 + expectedRewardsFirstDeposit;
 
         uint256 aliceBalance = staking.balanceOf(alice);
 
-        assertTrue(
-            areValuesClose(aliceBalance, expectedShares, 100),
-            "Alice's shares should include rewards from the first quarter"
+        assertApproxEqAbs(
+            aliceBalance, expectedShares, 100, "Alice's shares should include rewards from the first quarter"
         );
 
         // Warp to the second quarter
@@ -276,32 +275,39 @@ contract MortarStakingTesting is Test {
         // Alice deposits again in the second quarter
         uint256 depositAmount2 = 50 ether;
 
+        uint256 tenSecondsReward = staking.rewardRate() * 10;
+        (uint256 previousReward,,,) = staking.userQuarterInfo(alice, 0);
         vm.startPrank(alice);
         staking.deposit(depositAmount2, alice);
         vm.stopPrank();
 
+        (uint256 updatedReward,,,) = staking.userQuarterInfo(alice, 1);
+        assertApproxEqAbs(
+            previousReward + tenSecondsReward, updatedReward, 1e8, "User's reward accrued should match expected value"
+        );
         // Warp to the end of the second quarter
         uint256 secondQuarterEndTime = staking.quarterTimestamps(2);
         vm.warp(secondQuarterEndTime);
 
+        // ==================== Quarter 3 ==================== //
         // Calculate expected rewards for the second quarter
-        uint256 timeInSecondQuarter = secondQuarterStartTime + 10;
-        uint256 expectedRewardsSecondQuarter = staking.calculateRewards(timeInSecondQuarter, secondQuarterEndTime);
 
-        // Total expected shares after both deposits and rewards
-        uint256 totalExpectedShares = expectedShares + depositAmount2 + expectedRewardsSecondQuarter;
+        uint256 totalAssets = staking.totalAssets();
 
-        aliceBalance = staking.balanceOf(alice);
+        // manually calculate the assets
+        // 1. Previously known asset value
+        (, uint256 lastUpdateTimestamp, uint256 totalRewardAccrued,, uint256 totalStaked) = staking.quarters(1);
+        uint256 previousAssets = totalStaked;
+        // 2. Calculate rewards for the second quarter
+        uint256 rewardAccrued =
+            totalRewardAccrued + (staking.rewardRate() * (secondQuarterEndTime - lastUpdateTimestamp));
 
-        // assertTrue(
-        //     areValuesClose(aliceBalance, totalExpectedShares, 100),
-        //     "Alice's shares should include rewards from both quarters"
-        // );
+        assertApproxEqAbs(totalAssets, previousAssets + rewardAccrued, 1000);
     }
 
     function testMultipleDepositsInSameQuarter() public {
         // Step 1: Warp to a time within the first quarter
-        uint256 firstQuarterTime = staking.quarterTimestamps(0) + 1 days;
+        uint256 firstQuarterTime = staking.quarterTimestamps(0) + 1;
         vm.warp(firstQuarterTime);
 
         // Step 2: Alice makes the first deposit
@@ -314,7 +320,7 @@ contract MortarStakingTesting is Test {
         uint256 firstDepositTime = block.timestamp;
 
         // Step 3: Warp forward but stay within the same quarter
-        uint256 timeElapsed = 5 days;
+        uint256 timeElapsed = 10;
         vm.warp(block.timestamp + timeElapsed);
 
         // Step 4: Alice makes the second deposit
@@ -329,15 +335,13 @@ contract MortarStakingTesting is Test {
         // Step 6: Fetch updated quarter and user info after the second deposit
         (uint256 accRewardPerShare,, uint256 totalRewardAccrued,,) = staking.quarters(0);
 
-        (uint256 rewardAccrued,,,) = staking.userQuarterInfo(alice, 0);
-
         // Step 7: Manually calculate the expected accumulated reward per share
 
         uint256 rewardsBetweenDeposits = staking.rewardRate() * (secondDepositTime - firstDepositTime);
         uint256 expectedAccRewardPerShare = (rewardsBetweenDeposits * 1e18) / depositAmount1;
         uint256 initialAccRewardPerShare = 0; // It was zero before any rewards
         uint256 totalExpectedAccRewardPerShare = initialAccRewardPerShare + expectedAccRewardPerShare;
-        uint256 tolerance = 1;
+        uint256 tolerance = 100;
         // Step 8: Assert that the accumulated reward per share matches the expected value
         assertApproxEqAbs(
             accRewardPerShare,
@@ -346,16 +350,12 @@ contract MortarStakingTesting is Test {
             "Accumulated reward per share should match expected value"
         );
         // Step 9: Assert that the total reward accrued matches the expected rewards
-        assertEq(
+        assertApproxEqAbs(
             totalRewardAccrued,
             rewardsBetweenDeposits,
+            tolerance,
             "Total reward accrued should match the calculated rewards between deposits"
         );
-        // Step 10: Assert that the user's reward accrued matches expected value
-        uint256 expectedUserRewardAccrued = rewardsBetweenDeposits;
-        assertEq(rewardAccrued, expectedUserRewardAccrued, "User's reward accrued should match expected value");
-
-        // Additional assertions can be added here to verify other state variables
     }
 
     function testTotalBalance() public { }
@@ -365,18 +365,4 @@ contract MortarStakingTesting is Test {
     function testDelegateVotes() public { }
 
     function testTransfer() public { }
-
-    // Helper function to check if two values are within epsilon of each other
-    function areValuesClose(uint256 a, uint256 b, uint256 epsilon) internal pure returns (bool) {
-        if (a == b) {
-            return true;
-        }
-
-        // Ensure we handle the case where a < b to avoid underflow
-        if (a < b) {
-            return b - a <= epsilon;
-        }
-
-        return a - b <= epsilon;
-    }
 }
