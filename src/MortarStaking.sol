@@ -457,8 +457,6 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         UserInfo storage currentUserInfo = userQuarterInfo[user][currentQuarter];
         currentUserInfo.shares = totalShares;
         currentUserInfo.lastUpdateTimestamp = quarterTimestamps[currentQuarter];
-        currentUserInfo.rewardDebt =
-            Math.mulDiv(quarters[currentQuarter].accRewardPerShare, currentUserInfo.shares, PRECISION);
         userLastProcessedQuarter[user] = currentQuarter;
     }
 
