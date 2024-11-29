@@ -340,15 +340,25 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
      * @dev Handles post-transfer actions.
      */
     function _afterTransfer(address from, address to, uint256 amount, uint256 currentQuarter) internal {
-        Quarter storage quarter = quarters[currentQuarter];
+        Quarter storage _quarter = quarters[currentQuarter];
 
         UserInfo storage senderInfo = userQuarterInfo[from][currentQuarter];
+        uint256 accruedReward =
+            Math.mulDiv(senderInfo.shares, _quarter.accRewardPerShare, PRECISION) - senderInfo.rewardDebt;
+
+        senderInfo.rewardAccrued += accruedReward;
         senderInfo.shares -= amount;
-        senderInfo.rewardDebt = Math.mulDiv(senderInfo.shares, quarter.accRewardPerShare, PRECISION);
+        senderInfo.rewardDebt = Math.mulDiv(senderInfo.shares, _quarter.accRewardPerShare, PRECISION);
+        senderInfo.lastUpdateTimestamp = block.timestamp;
 
         UserInfo storage recipientInfo = userQuarterInfo[to][currentQuarter];
+        accruedReward =
+            Math.mulDiv(recipientInfo.shares, _quarter.accRewardPerShare, PRECISION) - recipientInfo.rewardDebt;
+
+        recipientInfo.rewardAccrued += accruedReward;
         recipientInfo.shares += amount;
-        recipientInfo.rewardDebt = Math.mulDiv(recipientInfo.shares, quarter.accRewardPerShare, PRECISION);
+        recipientInfo.rewardDebt = Math.mulDiv(recipientInfo.shares, _quarter.accRewardPerShare, PRECISION);
+        recipientInfo.lastUpdateTimestamp = block.timestamp;
     }
 
     function _updateQuarter(uint256 currentQuarterIndex, uint256 endTime) internal {
