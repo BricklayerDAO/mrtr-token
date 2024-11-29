@@ -42,17 +42,14 @@ contract MortarStakingTesting is Test {
         token.mint(carol, 1000 ether);
 
         // Users approve the staking contract to spend their tokens
-        vm.startPrank(alice);
+        vm.prank(alice);
         token.approve(address(staking), type(uint256).max);
-        vm.stopPrank();
 
-        vm.startPrank(bob);
+        vm.prank(bob);
         token.approve(address(staking), type(uint256).max);
-        vm.stopPrank();
 
-        vm.startPrank(carol);
+        vm.prank(carol);
         token.approve(address(staking), type(uint256).max);
-        vm.stopPrank();
     }
 
     function test_getCurrentQuarter() public {
@@ -155,18 +152,16 @@ contract MortarStakingTesting is Test {
     }
 
     function _depositAndCheckBalance(address user, uint256 amount) internal {
-        vm.startPrank(user);
+        vm.prank(user);
         staking.deposit(amount, user);
-        vm.stopPrank();
 
         uint256 userBalance = staking.balanceOf(user);
         assertEq(userBalance, amount);
     }
 
     function _withdrawAndCheckBalance(address user, uint256 amount) internal {
-        vm.startPrank(user);
+        vm.prank(user);
         staking.withdraw(amount, user, user);
-        vm.stopPrank();
 
         uint256 userBalance = staking.balanceOf(user);
         assertEq(userBalance, staking.balanceOf(user));
@@ -203,9 +198,8 @@ contract MortarStakingTesting is Test {
         (bool flag, uint256 currentQuarter, uint256 start, uint256 end) = staking.getCurrentQuarter();
 
         // Test with just one deposit first
-        vm.startPrank(alice);
+        vm.prank(alice);
         staking.deposit(100 ether, alice);
-        vm.stopPrank();
         // Check Alice's balance
         uint256 aliceBalance = staking.balanceOf(alice);
         assertEq(aliceBalance, 100 ether, "Alice's initial deposit failed");
@@ -220,9 +214,8 @@ contract MortarStakingTesting is Test {
 
         uint256 depositAmount = 1000 ether;
 
-        vm.startPrank(alice);
+        vm.prank(alice);
         staking.deposit(depositAmount, alice);
-        vm.stopPrank();
 
         // Check the balances and shares
         uint256 shares = staking.balanceOf(alice);
@@ -249,9 +242,8 @@ contract MortarStakingTesting is Test {
 
         // ==================== Quarter 1 ==================== //
 
-        vm.startPrank(alice);
+        vm.prank(alice);
         staking.deposit(depositAmount1, alice);
-        vm.stopPrank();
 
         // Warp to the end of the first quarter
         vm.warp(firstQuarterEndTime);
@@ -276,9 +268,8 @@ contract MortarStakingTesting is Test {
 
         uint256 tenSecondsReward = staking.rewardRate() * 10;
         (uint256 previousReward,,,) = staking.userQuarterInfo(alice, 0);
-        vm.startPrank(alice);
+        vm.prank(alice);
         staking.deposit(depositAmount2, alice);
-        vm.stopPrank();
 
         (uint256 updatedReward,,,) = staking.userQuarterInfo(alice, 1);
         assertApproxEqAbs(
@@ -311,9 +302,8 @@ contract MortarStakingTesting is Test {
 
         // Step 2: Alice makes the first deposit
         uint256 depositAmount1 = 100 ether;
-        vm.startPrank(alice);
+        vm.prank(alice);
         staking.deposit(depositAmount1, alice);
-        vm.stopPrank();
 
         // Step 3: Warp forward but stay within the same quarter
         uint256 timeElapsed = 10;
@@ -321,9 +311,8 @@ contract MortarStakingTesting is Test {
 
         // Step 4: Alice makes the second deposit
         uint256 depositAmount2 = 50 ether;
-        vm.startPrank(alice);
+        vm.prank(alice);
         staking.deposit(depositAmount2, alice);
-        vm.stopPrank();
 
         // Step 6: Fetch updated quarter and user info after the second deposit
         (uint256 accRewardPerShare,, uint256 totalRewardAccrued,,) = staking.quarters(0);
@@ -359,7 +348,6 @@ contract MortarStakingTesting is Test {
         vm.warp(timeInFirstQuarter);
 
         uint256 aliceDeposit1 = 100 ether;
-        uint256 bobDeposit1 = 200 ether;
 
         // Alice deposits in the first quarter
         vm.prank(alice);
