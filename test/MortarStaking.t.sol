@@ -168,11 +168,11 @@ contract MortarStakingTesting is Test {
     }
 
     function _withdrawAllAndCheckBalance(address user) internal {
-        vm.startPrank(user);
+        vm.prank(user);
+        staking.withdraw(userAssets, user, user);
+
         uint256 userShares = staking.balanceOf(user);
         uint256 userAssets = staking.convertToAssets(userShares);
-        staking.withdraw(userAssets, user, user);
-        vm.stopPrank();
 
         assertEq(staking.balanceOf(user), 0);
     }
