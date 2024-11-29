@@ -505,6 +505,7 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         }
 
         // Step 2: From the there on to the current quarter calculate the rewards and shares without loop
+        _quarter = quarters[processedQuarter]; // TODO: confirm
         uint256 totalRewards = calculateRewards(_quarter.lastUpdateTimestamp, startTimestamp);
         uint256 accRewardPerShares =
             _quarter.accRewardPerShare + Math.mulDiv(totalRewards, PRECISION, _quarter.totalShares);
