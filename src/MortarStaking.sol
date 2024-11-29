@@ -361,9 +361,7 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         recipientInfo.lastUpdateTimestamp = block.timestamp;
     }
 
-    function _updateQuarter(uint256 currentQuarterIndex, uint256 endTime) internal {
-        if (block.timestamp > endTime) return;
-
+    function _updateQuarter(uint256 currentQuarterIndex) internal {
         Quarter storage _quarter = quarters[currentQuarterIndex];
 
         // Step 1: Process previous quarters if any that are unprocessed and update the current quarter with the
