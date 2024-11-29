@@ -513,7 +513,7 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         return balance;
     }
 
-    function calculateSharesFromRewards(
+    function _calculateSharesFromRewards(
         uint256 rewards,
         uint256 shares,
         uint256 staked
