@@ -530,29 +530,30 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
     function _processPendingRewards(address user, uint256 currentQuarter) internal {
         uint256 lastProcessed = userLastProcessedQuarter[user];
         uint256 totalShares = userQuarterInfo[user][lastProcessed].shares;
+        // Update the current quarter's user data with the last updated quarter's data
+        UserInfo storage currentUserInfo = userQuarterInfo[user][currentQuarter];
 
         // If all quarters are processed then don't do any processing
-        // if(lastProcessed == currentQuarter) return;
+        if (lastProcessed == currentQuarter) return;
+
         for (uint256 i = lastProcessed; i < currentQuarter; i++) {
-            UserInfo storage userInfo = userQuarterInfo[user][i];
-            Quarter storage quarter = quarters[i];
+            UserInfo memory userInfo = userQuarterInfo[user][i];
+            Quarter memory quarter = quarters[i];
             // Calculate the pending rewards: There is precision error of 1e-18
-            uint256 accumulatedReward = Math.mulDiv(userInfo.shares, quarter.accRewardPerShare, PRECISION);
+            uint256 accumulatedReward = Math.mulDiv(totalShares, quarter.accRewardPerShare, PRECISION);
             uint256 pending = userQuarterInfo[user][i].rewardAccrued + accumulatedReward - userInfo.rewardDebt;
             if (pending > 0) {
                 // Convert the pending rewards to shares
-                uint256 newShares = calculateSharesFromRewards(pending, totalShares, quarter.totalStaked);
+                uint256 newShares = _calculateSharesFromRewards(pending, totalShares, quarter.totalStaked);
                 totalShares += newShares;
-                // Mint the shares to the user
-                _mint(user, newShares);
             }
 
             // Reset user's data for thran loop processed quarter
             delete userQuarterInfo[user][i];
         }
 
-        // Update the current quarter's user data with the last updated quarter's data
-        UserInfo storage currentUserInfo = userQuarterInfo[user][currentQuarter];
+        // Mint shares for the user
+        _mint(user, totalShares);
         currentUserInfo.shares = totalShares;
         currentUserInfo.lastUpdateTimestamp = quarterTimestamps[currentQuarter];
         userLastProcessedQuarter[user] = currentQuarter;
