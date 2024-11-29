@@ -373,6 +373,7 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
             // 1. Calculate rewards accrued since the last update to the end of the quarter
             uint256 rewardsAccrued = calculateRewards(pastQuarter.lastUpdateTimestamp, quarterEndTime);
             pastQuarter.totalRewardAccrued += rewardsAccrued;
+
             // 2. Calculate accRewardPerShare BEFORE updating totalShares to prevent dilution
             if (pastQuarter.totalShares > 0) {
                 pastQuarter.accRewardPerShare =
@@ -383,7 +384,7 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
 
             // 3. Convert rewards to shares based on the current totalShares and totalStaked
             if (pastQuarter.totalStaked > 0) {
-                uint256 newShares = calculateSharesFromRewards(
+                uint256 newShares = _calculateSharesFromRewards(
                     pastQuarter.totalRewardAccrued, pastQuarter.totalShares, pastQuarter.totalStaked
                 );
                 quarters[i + 1].totalShares = pastQuarter.totalShares + newShares;
@@ -402,6 +403,7 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         // Then calculate the accRewardPerShare
         if (_quarter.totalShares > 0) {
             uint256 rewards = calculateRewards(_quarter.lastUpdateTimestamp, block.timestamp);
+            _quarter.totalRewardAccrued += rewards;
             _quarter.accRewardPerShare += Math.mulDiv(rewards, PRECISION, _quarter.totalShares);
         }
 
