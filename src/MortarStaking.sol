@@ -12,21 +12,6 @@ import { ERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC2
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 
 contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeable, ReentrancyGuardUpgradeable {
-    // Constants
-    uint256 private constant TOTAL_REWARDS = 450_000_000 ether;
-    uint256 private constant PRECISION = 1e18;
-
-    // Custom Errors
-    error InvalidStakingPeriod();
-    error CannotStakeZero();
-    error ZeroAddress();
-    error CannotWithdrawZero();
-    error CannotRedeemZero();
-
-    // State Variables
-    uint256 public rewardRate;
-    uint256 public lastProcessedQuarter;
-
     struct Quarter {
         uint256 accRewardPerShare; // Scaled by PRECISION
         uint256 lastUpdateTimestamp;
@@ -42,6 +27,28 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         uint256 shares;
     }
 
+    // Constants
+    uint256 private constant TOTAL_REWARDS = 450_000_000 ether;
+    uint256 private constant PRECISION = 1e18;
+
+    // Custom Errors
+    error InvalidStakingPeriod();
+    error CannotStakeZero();
+    error ZeroAddress();
+    error CannotWithdrawZero();
+    error CannotRedeemZero();
+
+    // Events
+    event Deposited(address indexed user, uint256 assets, uint256 shares);
+    event Minted(address indexed user, uint256 shares, uint256 assets);
+    event Withdrawn(address indexed user, uint256 assets, uint256 shares);
+    event Redeemed(address indexed user, uint256 shares, uint256 assets);
+    event RewardDistributed(uint256 quarter, uint256 reward);
+
+    // State Variables
+    uint256 public rewardRate;
+    uint256 public lastProcessedQuarter;
+
     // Mappings
     mapping(uint256 => Quarter) public quarters;
     mapping(address => mapping(uint256 => UserInfo)) public userQuarterInfo;
@@ -50,12 +57,6 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
     // Array of quarter end timestamps
     uint256[] public quarterTimestamps;
 
-    // Events
-    event Deposited(address indexed user, uint256 assets, uint256 shares);
-    event Minted(address indexed user, uint256 shares, uint256 assets);
-    event Withdrawn(address indexed user, uint256 assets, uint256 shares);
-    event Redeemed(address indexed user, uint256 shares, uint256 assets);
-    event RewardDistributed(uint256 quarter, uint256 reward);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
