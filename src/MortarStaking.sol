@@ -469,7 +469,9 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
          *             and the current total shares and staked data (which from last processed quarter).
          */
         uint256 userLastProcessed = userLastProcessedQuarter[account];
-        uint256 balance = super.balanceOf(account);
+
+        uint256 balance = userQuarterInfo[account][userLastProcessed].shares;
+
         (bool isValid, uint256 currentQuarter, uint256 startTimestamp,) = getCurrentQuarter();
         if (!isValid || userLastProcessed == currentQuarter) return balance;
 
@@ -478,17 +480,26 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         UserInfo memory _userInfo = userQuarterInfo[account][userLastProcessed];
         Quarter memory _quarter = quarters[userLastProcessed];
 
-        // Step 1: Run a loop to process the user rewards from the user's last processed quarter to the quarter's last
-        // processed quarter
-        for (uint256 i = userLastProcessed; i < processedQuarter && processedQuarter != 0; i++) {
-            UserInfo memory userInfo = userQuarterInfo[account][i];
+        // Step 1: Process the last interacted quarter first and settle that
+        uint256 accumulatedReward =
+            _userInfo.rewardAccrued + Math.mulDiv(balance, _quarter.accRewardPerShare, PRECISION) - _userInfo.rewardDebt;
+
+        uint256 newShares;
+
+        if (accumulatedReward > 0) {
+            newShares = _calculateSharesFromRewards(accumulatedReward, _quarter.totalShares, _quarter.totalStaked);
+            balance += newShares;
+        }
+
+        // Step 1: Run a loop to process the user rewards from the user's last processed quarter to the last processed
+        // global Quarter
+        for (uint256 i = userLastProcessed + 1; i < processedQuarter; i++) {
             Quarter memory quarter = quarters[i];
 
-            uint256 accumulatedReward = Math.mulDiv(userInfo.shares, quarter.accRewardPerShare, PRECISION);
-            uint256 pending = userInfo.rewardAccrued + accumulatedReward - userInfo.rewardDebt;
+            accumulatedReward = Math.mulDiv(balance, quarter.accRewardPerShare, PRECISION);
 
-            if (pending > 0) {
-                uint256 newShares = calculateSharesFromRewards(pending, quarter.totalShares, quarter.totalStaked);
+            if (accumulatedReward > 0) {
+                newShares = _calculateSharesFromRewards(accumulatedReward, quarter.totalShares, quarter.totalStaked);
                 balance += newShares;
             }
         }
