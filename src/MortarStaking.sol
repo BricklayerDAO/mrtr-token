@@ -568,10 +568,9 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         if (!isValid) return supply;
 
         // Step 2: Calculate the rewards for the last quarter and convert them to shares
-        uint256 rewardsAccumulated =
-            lastQuarter.totalRewardAccrued + calculateRewards(lastQuarter.lastUpdateTimestamp, startTimestamp);
-
         if (lastQuarter.totalStaked > 0) {
+            uint256 rewardsAccumulated =
+                lastQuarter.totalRewardAccrued + calculateRewards(lastQuarter.lastUpdateTimestamp, startTimestamp);
             uint256 shares = Math.mulDiv(rewardsAccumulated, lastQuarter.totalShares, lastQuarter.totalStaked);
             supply += shares;
         }
@@ -584,12 +583,16 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
      */
     function totalAssets() public view virtual override returns (uint256) {
         (bool isValid,, uint256 startTimestamp,) = getCurrentQuarter();
-        uint256 totalStaked = quarters[lastProcessedQuarter].totalStaked;
-        if (!isValid && block.timestamp <= quarterTimestamps[0]) return totalStaked;
+        Quarter memory lastQuarter = quarters[lastProcessedQuarter];
+        uint256 totalStaked = lastQuarter.totalStaked;
+        if (!isValid) return totalStaked;
 
-        uint256 rewardsAccumulated = quarters[lastProcessedQuarter].totalRewardAccrued
-            + calculateRewards(quarters[lastProcessedQuarter].lastUpdateTimestamp, startTimestamp);
-        totalStaked += rewardsAccumulated;
+        if (totalStaked > 0) {
+            uint256 rewardsAccumulated =
+                lastQuarter.totalRewardAccrued + calculateRewards(lastQuarter.lastUpdateTimestamp, startTimestamp);
+            totalStaked += rewardsAccumulated;
+        }
+
         return totalStaked;
     }
 
