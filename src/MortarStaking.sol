@@ -9,9 +9,17 @@ import { ERC20VotesUpgradeable } from
 import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import { ERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
+import { AccessControlUpgradeable } from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 
-contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeable, ReentrancyGuardUpgradeable {
+contract MortarStaking is
+    Initializable,
+    ERC4626Upgradeable,
+    ERC20VotesUpgradeable,
+    ReentrancyGuardUpgradeable,
+    AccessControlUpgradeable
+{
     struct Quarter {
         uint256 accRewardPerShare; // Scaled by PRECISION
         uint256 lastUpdateTimestamp;
@@ -30,6 +38,8 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
     // Constants
     uint256 private constant TOTAL_REWARDS = 450_000_000 ether;
     uint256 private constant PRECISION = 1e18;
+    uint256 private constant CLAIM_PERIOD = 30 days;
+    bytes32 public constant QUARRY_ROLE = keccak256("QUARRY_ROLE");
 
     // Custom Errors
     error InvalidStakingPeriod();
@@ -37,6 +47,9 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
     error ZeroAddress();
     error CannotWithdrawZero();
     error CannotRedeemZero();
+    error UnclaimedAssetsLeft();
+    error ClaimPeriodNotOver();
+    error ClaimPeriodOver();
 
     // Events
     event Deposited(address indexed user, uint256 assets, uint256 shares);
@@ -44,6 +57,9 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
     event Withdrawn(address indexed user, uint256 assets, uint256 shares);
     event Redeemed(address indexed user, uint256 shares, uint256 assets);
     event RewardDistributed(uint256 quarter, uint256 reward);
+    event QuarryRewardsAdded(uint256 amount, uint256 distributionTimestamp);
+    event QuarryRewardsClaimed(address indexed user, uint256 amount);
+    event UnclaimedQuarryRewardsRetrieved(uint256 amount);
 
     // State Variables
     uint256 public rewardRate;
@@ -57,6 +73,10 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
     // Array of quarter end timestamps
     uint256[] public quarterTimestamps;
 
+    // Quary data
+    uint256 public lastQuaryReward;
+    uint256 public distributionTimestamp;
+    uint256 public claimed;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -67,11 +87,15 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
      * @dev Initializes the contract with the given asset.
      * @param _asset The ERC20 asset to be staked.
      */
-    function initialize(IERC20 _asset) external initializer {
+    function initialize(IERC20 _asset, address _admin) external initializer {
         __ERC4626_init(_asset);
         __ERC20_init("XMortar", "xMRTR");
         __ERC20Votes_init();
         __ReentrancyGuard_init();
+        __AccessControl_init();
+        
+        // Grant admin role to the admin
+        _grantRole(DEFAULT_ADMIN_ROLE, _admin);
 
         // Quarter is open set of the time period
         // E.g., (1_735_084_800 + 1) to (1_742_860_800 - 1) is first quarter
@@ -649,5 +673,43 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         returns (uint256)
     {
         return super._convertToAssets(shares, rounding);
+    }
+
+    function addQuarryRewards(uint256 amount) external onlyRole(QUARRY_ROLE) {
+        if (claimed != lastQuaryReward) {
+            revert UnclaimedAssetsLeft();
+        }
+        lastQuaryReward = amount;
+        distributionTimestamp = block.timestamp;
+
+        SafeERC20.safeTransferFrom(IERC20(asset()), msg.sender, address(this), amount);
+        emit QuarryRewardsAdded(amount, distributionTimestamp);
+    }
+
+    function claimQuarryRewards() external {
+        if (block.timestamp > distributionTimestamp + CLAIM_PERIOD) {
+            revert ClaimPeriodOver();
+        }
+
+        // TODO: I think following 2 voting functions will not work
+        uint256 userShares = getPastVotes(msg.sender, distributionTimestamp);
+        uint256 totalShares = getPastTotalSupply(distributionTimestamp);
+        uint256 rewards = Math.mulDiv(userShares, lastQuaryReward, totalShares);
+
+        if (rewards > 0) {
+            SafeERC20.safeTransfer(IERC20(asset()), msg.sender, rewards);
+            claimed += rewards;
+            emit QuarryRewardsClaimed(msg.sender, rewards);
+        }
+    }
+
+    function retrieveUnclaimedQuarryRewards() external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (block.timestamp <= distributionTimestamp + CLAIM_PERIOD) {
+            revert ClaimPeriodNotOver();
+        }
+        uint256 unclaimed = lastQuaryReward - claimed;
+        claimed = lastQuaryReward;
+        SafeERC20.safeTransfer(IERC20(asset()), msg.sender, unclaimed);
+        emit UnclaimedQuarryRewardsRetrieved(unclaimed);
     }
 }
