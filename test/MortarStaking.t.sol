@@ -179,8 +179,7 @@ contract MortarStakingTesting is Test {
         staking.withdraw(userAssets, user, user);
         vm.stopPrank();
 
-        uint256 userBalance = staking.balanceOf(user);
-        assertEq(userBalance, 0);
+        assertEq(staking.balanceOf(user), 0);
     }
 
     function _checkUserQuarterInfo() internal view {
