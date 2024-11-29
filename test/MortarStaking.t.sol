@@ -316,9 +316,6 @@ contract MortarStakingTesting is Test {
         staking.deposit(depositAmount1, alice);
         vm.stopPrank();
 
-        // Record the timestamp of the first deposit
-        uint256 firstDepositTime = block.timestamp;
-
         // Step 3: Warp forward but stay within the same quarter
         uint256 timeElapsed = 10;
         vm.warp(block.timestamp + timeElapsed);
@@ -329,15 +326,12 @@ contract MortarStakingTesting is Test {
         staking.deposit(depositAmount2, alice);
         vm.stopPrank();
 
-        // Record the timestamp of the second deposit
-        uint256 secondDepositTime = block.timestamp;
-
         // Step 6: Fetch updated quarter and user info after the second deposit
         (uint256 accRewardPerShare,, uint256 totalRewardAccrued,,) = staking.quarters(0);
 
         // Step 7: Manually calculate the expected accumulated reward per share
 
-        uint256 rewardsBetweenDeposits = staking.rewardRate() * (secondDepositTime - firstDepositTime);
+        uint256 rewardsBetweenDeposits = staking.rewardRate() * (block.timestamp - firstQuarterTime);
         uint256 expectedAccRewardPerShare = (rewardsBetweenDeposits * 1e18) / depositAmount1;
         uint256 initialAccRewardPerShare = 0; // It was zero before any rewards
         uint256 totalExpectedAccRewardPerShare = initialAccRewardPerShare + expectedAccRewardPerShare;
@@ -358,7 +352,23 @@ contract MortarStakingTesting is Test {
         );
     }
 
-    function testTotalBalance() public { }
+    function testTotalBalance() public {
+        // Warp to the middle of the first quarter
+        uint256 firstQuarterStartTime = staking.quarterTimestamps(0);
+        uint256 firstQuarterEndTime = staking.quarterTimestamps(1);
+        uint256 timeInFirstQuarter = firstQuarterStartTime + (firstQuarterEndTime - firstQuarterStartTime) / 2;
+        vm.warp(timeInFirstQuarter);
+
+        uint256 aliceDeposit1 = 100 ether;
+        uint256 bobDeposit1 = 200 ether;
+
+        // Alice deposits in the first quarter
+        vm.prank(alice);
+        staking.deposit(aliceDeposit1, alice);
+        vm.warp(firstQuarterEndTime + 1);
+        vm.prank(alice);
+        staking.deposit(aliceDeposit1, alice);
+    }
 
     function testBalanceOf() public { }
 
