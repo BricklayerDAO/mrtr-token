@@ -169,14 +169,13 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         if (assets == 0) revert CannotStakeZero();
         if (receiver == address(0)) revert ZeroAddress();
 
-        (bool isValid, uint256 currentQuarter,, uint256 endTime) = getCurrentQuarter();
+        (bool isValid, uint256 currentQuarter,,) = getCurrentQuarter();
         if (!isValid) revert InvalidStakingPeriod();
 
-        _updateQuarter(currentQuarter, endTime);
+        _updateQuarter(currentQuarter);
         _processPendingRewards(receiver, currentQuarter);
         uint256 shares = super.deposit(assets, receiver);
         _afterDepositOrMint(assets, shares, receiver, currentQuarter);
-
         emit Deposited(receiver, assets, shares);
         return shares;
     }
@@ -188,10 +187,10 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         if (shares == 0) revert CannotStakeZero();
         if (receiver == address(0)) revert ZeroAddress();
 
-        (bool isValid, uint256 currentQuarter,, uint256 endTime) = getCurrentQuarter();
+        (bool isValid, uint256 currentQuarter,,) = getCurrentQuarter();
         if (!isValid) revert InvalidStakingPeriod();
 
-        _updateQuarter(currentQuarter, endTime);
+        _updateQuarter(currentQuarter);
         _processPendingRewards(receiver, currentQuarter);
 
         uint256 assets = super.mint(shares, receiver);
@@ -201,23 +200,6 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         return assets;
     }
 
-    function _afterDepositOrMint(uint256 assets, uint256 shares, address receiver, uint256 currentQuarter) private {
-        UserInfo storage _userInfo = userQuarterInfo[receiver][currentQuarter];
-        Quarter storage _quarter = quarters[currentQuarter];
-        uint256 accruedReward =
-            Math.mulDiv(_userInfo.shares, _quarter.accRewardPerShare, PRECISION) - _userInfo.rewardDebt;
-
-        _userInfo.rewardAccrued += accruedReward;
-        _quarter.totalRewardAccrued += accruedReward;
-
-        _userInfo.shares += shares;
-        _userInfo.rewardDebt = Math.mulDiv(_userInfo.shares, _quarter.accRewardPerShare, PRECISION);
-        _userInfo.lastUpdateTimestamp = uint64(block.timestamp);
-
-        _quarter.totalShares += shares;
-        _quarter.totalStaked += assets;
-    }
-
     /**
      * @notice Withdraws staked assets by burning shares.
      */
@@ -225,10 +207,10 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         if (assets == 0) revert CannotWithdrawZero();
         if (receiver == address(0)) revert ZeroAddress();
 
-        (bool isValid, uint256 currentQuarter,, uint256 endTime) = getCurrentQuarter();
+        (bool isValid, uint256 currentQuarter,,) = getCurrentQuarter();
         if (!isValid) revert InvalidStakingPeriod();
 
-        _updateQuarter(currentQuarter, endTime);
+        _updateQuarter(currentQuarter);
         _processPendingRewards(owner, currentQuarter);
 
         uint256 shares = super.withdraw(assets, receiver, owner);
@@ -245,10 +227,10 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         if (shares == 0) revert CannotRedeemZero();
         if (receiver == address(0)) revert ZeroAddress();
 
-        (bool isValid, uint256 currentQuarter,, uint256 endTime) = getCurrentQuarter();
+        (bool isValid, uint256 currentQuarter,,) = getCurrentQuarter();
         if (!isValid) revert InvalidStakingPeriod();
 
-        _updateQuarter(currentQuarter, endTime);
+        _updateQuarter(currentQuarter);
         _processPendingRewards(owner, currentQuarter);
 
         uint256 assets = super.redeem(shares, receiver, owner);
@@ -256,23 +238,6 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
 
         emit Redeemed(owner, shares, assets);
         return assets;
-    }
-
-    function _afterWithdrawOrRedeem(uint256 assets, uint256 shares, address owner, uint256 currentQuarter) private {
-        UserInfo storage _userInfo = userQuarterInfo[owner][currentQuarter];
-        Quarter storage _quarter = quarters[currentQuarter];
-
-        uint256 rewardsAccrued =
-            Math.mulDiv(_userInfo.shares, _quarter.accRewardPerShare, PRECISION) - _userInfo.rewardDebt;
-        _userInfo.shares -= shares;
-        _userInfo.rewardAccrued += rewardsAccrued;
-        _quarter.totalRewardAccrued += rewardsAccrued;
-
-        _userInfo.lastUpdateTimestamp = block.timestamp;
-        _userInfo.rewardDebt = Math.mulDiv(_userInfo.shares, _quarter.accRewardPerShare, PRECISION);
-
-        _quarter.totalShares -= shares;
-        _quarter.totalStaked -= assets;
     }
 
     /**
@@ -289,10 +254,10 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
     {
         if (to == address(0)) revert ZeroAddress();
 
-        (bool isValid, uint256 currentQuarter,, uint256 endTime) = getCurrentQuarter();
+        (bool isValid, uint256 currentQuarter,,) = getCurrentQuarter();
         if (!isValid) revert InvalidStakingPeriod();
 
-        _updateQuarter(currentQuarter, endTime);
+        _updateQuarter(currentQuarter);
         _processPendingRewards(msg.sender, currentQuarter);
         _processPendingRewards(to, currentQuarter);
 
@@ -319,10 +284,10 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         if (to == address(0)) revert ZeroAddress();
         if (from == address(0)) revert ZeroAddress();
 
-        (bool isValid, uint256 currentQuarter,, uint256 endTime) = getCurrentQuarter();
+        (bool isValid, uint256 currentQuarter,,) = getCurrentQuarter();
         if (!isValid) revert InvalidStakingPeriod();
 
-        _updateQuarter(currentQuarter, endTime);
+        _updateQuarter(currentQuarter);
         _processPendingRewards(from, currentQuarter);
         _processPendingRewards(to, currentQuarter);
 
@@ -331,6 +296,44 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
 
         emit Transfer(from, to, amount);
         return success;
+    }
+
+    /**
+     * @notice Handles post-deposit or mint actions.
+     */
+    function _afterDepositOrMint(uint256 assets, uint256 shares, address receiver, uint256 currentQuarter) private {
+        UserInfo storage _userInfo = userQuarterInfo[receiver][currentQuarter];
+        Quarter storage _quarter = quarters[currentQuarter];
+
+        uint256 accruedReward =
+            Math.mulDiv(_userInfo.shares, _quarter.accRewardPerShare, PRECISION) - _userInfo.rewardDebt;
+        _userInfo.rewardAccrued += accruedReward;
+
+        _userInfo.shares += shares;
+        _userInfo.rewardDebt = Math.mulDiv(_userInfo.shares, _quarter.accRewardPerShare, PRECISION);
+        _userInfo.lastUpdateTimestamp = block.timestamp;
+
+        _quarter.totalShares += shares;
+        _quarter.totalStaked += assets;
+    }
+
+    /**
+     * @notice Handles post-withdraw or redeem actions.
+     */
+    function _afterWithdrawOrRedeem(uint256 assets, uint256 shares, address owner, uint256 currentQuarter) private {
+        UserInfo storage _userInfo = userQuarterInfo[owner][currentQuarter];
+        Quarter storage _quarter = quarters[currentQuarter];
+
+        uint256 accruedReward =
+            Math.mulDiv(_userInfo.shares, _quarter.accRewardPerShare, PRECISION) - _userInfo.rewardDebt;
+        _userInfo.rewardAccrued += accruedReward;
+
+        _userInfo.shares -= shares;
+        _userInfo.rewardDebt = Math.mulDiv(_userInfo.shares, _quarter.accRewardPerShare, PRECISION);
+        _userInfo.lastUpdateTimestamp = block.timestamp;
+
+        _quarter.totalShares -= shares;
+        _quarter.totalStaked -= assets;
     }
 
     /**
