@@ -199,8 +199,8 @@ contract MortarStaking is
         if (assets == 0) revert CannotStakeZero();
         if (receiver == address(0)) revert ZeroAddress();
 
-        (bool isValid, uint256 currentQuarter,,) = getCurrentQuarter();
-        if (!isValid) revert InvalidStakingPeriod();
+        (uint256 currentQuarter,,) = getCurrentQuarter();
+        if (!_isStakingAllowed()) revert InvalidStakingPeriod();
 
         _updateQuarter(currentQuarter);
         _processPendingRewards(receiver, currentQuarter);
@@ -217,8 +217,8 @@ contract MortarStaking is
         if (shares == 0) revert CannotStakeZero();
         if (receiver == address(0)) revert ZeroAddress();
 
-        (bool isValid, uint256 currentQuarter,,) = getCurrentQuarter();
-        if (!isValid) revert InvalidStakingPeriod();
+        (uint256 currentQuarter,,) = getCurrentQuarter();
+        if (!_isStakingAllowed()) revert InvalidStakingPeriod();
 
         _updateQuarter(currentQuarter);
         _processPendingRewards(receiver, currentQuarter);
@@ -237,8 +237,8 @@ contract MortarStaking is
         if (assets == 0) revert CannotWithdrawZero();
         if (receiver == address(0)) revert ZeroAddress();
 
-        (bool isValid, uint256 currentQuarter,,) = getCurrentQuarter();
-        if (!isValid) revert InvalidStakingPeriod();
+        (uint256 currentQuarter,,) = getCurrentQuarter();
+        if (!_isStakingAllowed()) revert InvalidStakingPeriod();
 
         _updateQuarter(currentQuarter);
         _processPendingRewards(owner, currentQuarter);
@@ -257,8 +257,8 @@ contract MortarStaking is
         if (shares == 0) revert CannotRedeemZero();
         if (receiver == address(0)) revert ZeroAddress();
 
-        (bool isValid, uint256 currentQuarter,,) = getCurrentQuarter();
-        if (!isValid) revert InvalidStakingPeriod();
+        (uint256 currentQuarter,,) = getCurrentQuarter();
+        if (!_isStakingAllowed()) revert InvalidStakingPeriod();
 
         _updateQuarter(currentQuarter);
         _processPendingRewards(owner, currentQuarter);
@@ -282,8 +282,8 @@ contract MortarStaking is
         nonReentrant
         returns (bool)
     {
-        (bool isValid, uint256 currentQuarter,,) = getCurrentQuarter();
-        if (!isValid) revert InvalidStakingPeriod();
+        (uint256 currentQuarter,,) = getCurrentQuarter();
+        if (!_isStakingAllowed()) revert InvalidStakingPeriod();
 
         _updateQuarter(currentQuarter);
         _processPendingRewards(msg.sender, currentQuarter);
@@ -308,8 +308,8 @@ contract MortarStaking is
         nonReentrant
         returns (bool)
     {
-        (bool isValid, uint256 currentQuarter,,) = getCurrentQuarter();
-        if (!isValid) revert InvalidStakingPeriod();
+        (uint256 currentQuarter,,) = getCurrentQuarter();
+        if (!_isStakingAllowed()) revert InvalidStakingPeriod();
 
         _updateQuarter(currentQuarter);
         _processPendingRewards(from, currentQuarter);
@@ -414,24 +414,26 @@ contract MortarStaking is
         _quarter.lastUpdateTimestamp = block.timestamp;
     }
 
-    function getCurrentQuarter() public view returns (bool valid, uint256 index, uint256 start, uint256 end) {
+    /// @notice Gives quarter index data for the current timestamp
+    function getCurrentQuarter() public view returns (uint256 index, uint256 start, uint256 end) {
         return getQuarter(block.timestamp);
     }
-    /// @dev Binary search to get the current quarter index, start timestamp and end timestamp
 
+    /// @dev Binary search to get the quarter index, start timestamp and end timestamp
     function getQuarter(uint256 timestamp)
         public
         view
-        returns (bool valid, uint256 index, uint256 start, uint256 end)
+        returns (uint256 index, uint256 start, uint256 end)
     {
         /// @todo remove the `flag` and just use if(block.timestmap < quarterTimestamp[0]) for legal/illegal
         uint256 left = 0;
-        uint256 right = quarterTimestamps.length - 1;
+        uint256[] memory arr = quarterTimestamps;
+        uint256 right = arr.length - 1;
 
         // Binary search implementation
         while (left < right) {
             uint256 mid = (left + right) / 2;
-            if (timestamp < quarterTimestamps[mid]) {
+            if (timestamp < arr[mid]) {
                 right = mid;
             } else {
                 left = mid + 1;
@@ -439,18 +441,18 @@ contract MortarStaking is
         }
 
         // Check if we're in a valid staking period
-        if (timestamp >= quarterTimestamps[0] && timestamp < quarterTimestamps[quarterTimestamps.length - 1]) {
+        if (timestamp >= arr[0] && timestamp < arr[arr.length - 1]) {
             uint256 quarterIndex = left > 0 ? left - 1 : 0;
-            return (true, quarterIndex, quarterTimestamps[quarterIndex], quarterTimestamps[quarterIndex + 1]);
+            return ( quarterIndex, arr[quarterIndex], arr[quarterIndex + 1]);
         }
 
-        if (timestamp >= quarterTimestamps[quarterTimestamps.length - 1]) {
+        if (timestamp >= arr[arr.length - 1]) {
             return (
-                false, quarterTimestamps.length - 2, quarterTimestamps[quarterTimestamps.length - 1], type(uint256).max
+                arr.length - 1, arr[arr.length - 1], type(uint256).max
             );
         }
 
-        return (false, 0, 0, 0);
+        return (0, 0, 0);
     }
 
     /// @notice calculate the rewards for the given duration
@@ -518,9 +520,9 @@ contract MortarStaking is
     }
 
     function claim(address account) external {
-        (bool isValid, uint256 index,,) = getCurrentQuarter();
+        (uint256 index,,) = getCurrentQuarter();
 
-        if (!isValid) {
+        if (!_isStakingAllowed()) {
             if (index == 0) return;
             // @dev staking period is over, index is last quarter
             if (
@@ -577,5 +579,9 @@ contract MortarStaking is
         claimedQuarryRewards = lastQuaryRewards;
         SafeERC20.safeTransfer(IERC20(asset()), msg.sender, unclaimedQuarryRewards);
         emit UnclaimedQuarryRewardsQuarryRewardsRetrieved(unclaimedQuarryRewards);
+    }
+
+    function _isStakingAllowed() public view returns (bool) {
+        return block.timestamp >= quarterTimestamps[0] && block.timestamp < quarterTimestamps[quarterTimestamps.length - 1];
     }
 }
