@@ -4,35 +4,31 @@ pragma solidity 0.8.26;
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { ERC4626Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
-import { ERC20VotesUpgradeable } from
-    "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20VotesUpgradeable.sol";
+import { VotesUpgradeable } from "@openzeppelin/contracts-upgradeable/governance/utils/VotesUpgradeable.sol";
 import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import { ERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
+import { AccessControlUpgradeable } from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
+import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { Time } from "@openzeppelin/contracts/utils/types/Time.sol";
+import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
+import { Checkpoints } from "@openzeppelin/contracts/utils/structs/Checkpoints.sol";
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 
-contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeable, ReentrancyGuardUpgradeable {
-    // Constants
-    uint256 private constant TOTAL_REWARDS = 450_000_000 ether;
-    uint256 private constant PRECISION = 1e18;
-
-    // Custom Errors
-    error InvalidStakingPeriod();
-    error CannotStakeZero();
-    error ZeroAddress();
-    error CannotWithdrawZero();
-    error CannotRedeemZero();
-
-    // State Variables
-    uint256 public rewardRate;
-    uint256 public lastProcessedQuarter;
-
+contract MortarStaking is
+    Initializable,
+    ERC4626Upgradeable,
+    VotesUpgradeable,
+    ReentrancyGuardUpgradeable,
+    AccessControlUpgradeable
+{
     struct Quarter {
         uint256 accRewardPerShare; // Scaled by PRECISION
         uint256 lastUpdateTimestamp;
         uint256 totalRewardAccrued;
         uint256 totalShares;
         uint256 totalStaked;
+        uint256 sharesGenerated;
     }
 
     struct UserInfo {
@@ -42,6 +38,37 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         uint256 shares;
     }
 
+    // Constants
+    uint256 private constant TOTAL_REWARDS = 450_000_000 ether;
+    uint256 private constant PRECISION = 1e18;
+    uint256 private constant CLAIM_PERIOD = 30 days;
+    bytes32 public constant QUARRY_ROLE = keccak256("QUARRY_ROLE");
+
+    // Custom Errors
+    error InvalidStakingPeriod();
+    error CannotStakeZero();
+    error ZeroAddress();
+    error CannotWithdrawZero();
+    error CannotRedeemZero();
+    error UnclaimedQuarryRewardsAssetsLeft();
+    error ClaimPeriodNotOver();
+    error ClaimPeriodOver();
+    error QuarryRewardsAlreadyClaimed();
+    // Events
+
+    event Deposited(address indexed user, uint256 assets, uint256 shares);
+    event Minted(address indexed user, uint256 shares, uint256 assets);
+    event Withdrawn(address indexed user, uint256 assets, uint256 shares);
+    event Redeemed(address indexed user, uint256 shares, uint256 assets);
+    event RewardDistributed(uint256 quarter, uint256 reward);
+    event QuarryRewardsAdded(uint256 amount, uint256 distributionTimestamp);
+    event QuarryRewardsClaimedQuarryRewards(address indexed user, uint256 amount);
+    event UnclaimedQuarryRewardsQuarryRewardsRetrieved(uint256 amount);
+
+    // State Variables
+    uint256 public rewardRate;
+    uint256 public lastProcessedQuarter;
+
     // Mappings
     mapping(uint256 => Quarter) public quarters;
     mapping(address => mapping(uint256 => UserInfo)) public userQuarterInfo;
@@ -50,12 +77,11 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
     // Array of quarter end timestamps
     uint256[] public quarterTimestamps;
 
-    // Events
-    event Deposited(address indexed user, uint256 assets, uint256 shares);
-    event Minted(address indexed user, uint256 shares, uint256 assets);
-    event Withdrawn(address indexed user, uint256 assets, uint256 shares);
-    event Redeemed(address indexed user, uint256 shares, uint256 assets);
-    event RewardDistributed(uint256 quarter, uint256 reward);
+    // Quary data
+    uint256 public lastQuaryRewards;
+    uint256 public distributionTimestamp;
+    uint256 public claimedQuarryRewards;
+    mapping(address => uint256) public lastQuarryClaimedTimestamp;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -66,11 +92,15 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
      * @dev Initializes the contract with the given asset.
      * @param _asset The ERC20 asset to be staked.
      */
-    function initialize(IERC20 _asset) external initializer {
+    function initialize(IERC20 _asset, address _admin) external initializer {
         __ERC4626_init(_asset);
         __ERC20_init("XMortar", "xMRTR");
-        __ERC20Votes_init();
+        __Votes_init();
         __ReentrancyGuard_init();
+        __AccessControl_init();
+
+        // Grant admin role to the admin
+        _grantRole(DEFAULT_ADMIN_ROLE, _admin);
 
         // Quarter is open set of the time period
         // E.g., (1_735_084_800 + 1) to (1_742_860_800 - 1) is first quarter
@@ -252,8 +282,6 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         nonReentrant
         returns (bool)
     {
-        if (to == address(0)) revert ZeroAddress();
-
         (bool isValid, uint256 currentQuarter,,) = getCurrentQuarter();
         if (!isValid) revert InvalidStakingPeriod();
 
@@ -264,7 +292,6 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         bool success = super.transfer(to, amount);
         _afterTransfer(msg.sender, to, amount, currentQuarter);
 
-        emit Transfer(msg.sender, to, amount);
         return success;
     }
 
@@ -281,9 +308,6 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         nonReentrant
         returns (bool)
     {
-        if (to == address(0)) revert ZeroAddress();
-        if (from == address(0)) revert ZeroAddress();
-
         (bool isValid, uint256 currentQuarter,,) = getCurrentQuarter();
         if (!isValid) revert InvalidStakingPeriod();
 
@@ -294,7 +318,6 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         bool success = super.transferFrom(from, to, amount);
         _afterTransfer(from, to, amount, currentQuarter);
 
-        emit Transfer(from, to, amount);
         return success;
     }
 
@@ -304,10 +327,6 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
     function _afterDepositOrMint(uint256 assets, uint256 shares, address receiver, uint256 currentQuarter) private {
         UserInfo storage _userInfo = userQuarterInfo[receiver][currentQuarter];
         Quarter storage _quarter = quarters[currentQuarter];
-
-        uint256 accruedReward =
-            Math.mulDiv(_userInfo.shares, _quarter.accRewardPerShare, PRECISION) - _userInfo.rewardDebt;
-        _userInfo.rewardAccrued += accruedReward;
 
         _userInfo.shares += shares;
         _userInfo.rewardDebt = Math.mulDiv(_userInfo.shares, _quarter.accRewardPerShare, PRECISION);
@@ -324,10 +343,6 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         UserInfo storage _userInfo = userQuarterInfo[owner][currentQuarter];
         Quarter storage _quarter = quarters[currentQuarter];
 
-        uint256 accruedReward =
-            Math.mulDiv(_userInfo.shares, _quarter.accRewardPerShare, PRECISION) - _userInfo.rewardDebt;
-        _userInfo.rewardAccrued += accruedReward;
-
         _userInfo.shares -= shares;
         _userInfo.rewardDebt = Math.mulDiv(_userInfo.shares, _quarter.accRewardPerShare, PRECISION);
         _userInfo.lastUpdateTimestamp = block.timestamp;
@@ -343,19 +358,11 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         Quarter storage _quarter = quarters[currentQuarter];
 
         UserInfo storage senderInfo = userQuarterInfo[from][currentQuarter];
-        uint256 accruedReward =
-            Math.mulDiv(senderInfo.shares, _quarter.accRewardPerShare, PRECISION) - senderInfo.rewardDebt;
-
-        senderInfo.rewardAccrued += accruedReward;
         senderInfo.shares -= amount;
         senderInfo.rewardDebt = Math.mulDiv(senderInfo.shares, _quarter.accRewardPerShare, PRECISION);
         senderInfo.lastUpdateTimestamp = block.timestamp;
 
         UserInfo storage recipientInfo = userQuarterInfo[to][currentQuarter];
-        accruedReward =
-            Math.mulDiv(recipientInfo.shares, _quarter.accRewardPerShare, PRECISION) - recipientInfo.rewardDebt;
-
-        recipientInfo.rewardAccrued += accruedReward;
         recipientInfo.shares += amount;
         recipientInfo.rewardDebt = Math.mulDiv(recipientInfo.shares, _quarter.accRewardPerShare, PRECISION);
         recipientInfo.lastUpdateTimestamp = block.timestamp;
@@ -370,23 +377,18 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
             Quarter storage pastQuarter = quarters[i];
             uint256 quarterEndTime = quarterTimestamps[i + 1];
 
-            // 1. Calculate rewards accrued since the last update to the end of the quarter
-            uint256 rewardsAccrued = calculateRewards(pastQuarter.lastUpdateTimestamp, quarterEndTime);
-            pastQuarter.totalRewardAccrued += rewardsAccrued;
-
-            // 2. Calculate accRewardPerShare BEFORE updating totalShares to prevent dilution
             if (pastQuarter.totalShares > 0) {
-                pastQuarter.accRewardPerShare =
-                    Math.mulDiv(pastQuarter.totalRewardAccrued, PRECISION, pastQuarter.totalShares);
-            } else {
-                pastQuarter.accRewardPerShare = 0;
-            }
+                // 1. Calculate rewards accrued since the last update to the end of the quarter
+                uint256 rewardsAccrued = calculateRewards(pastQuarter.lastUpdateTimestamp, quarterEndTime);
+                pastQuarter.totalRewardAccrued += rewardsAccrued;
 
-            // 3. Convert rewards to shares based on the current totalShares and totalStaked
-            if (pastQuarter.totalStaked > 0) {
-                uint256 newShares = _calculateSharesFromRewards(
-                    pastQuarter.totalRewardAccrued, pastQuarter.totalShares, pastQuarter.totalStaked
-                );
+                // 2. Calculate accRewardPerShare BEFORE updating totalShares to prevent dilution
+                pastQuarter.accRewardPerShare += Math.mulDiv(rewardsAccrued, PRECISION, pastQuarter.totalShares);
+
+                // 3. Convert rewards to shares and mint them
+                uint256 newShares = convertToShares(pastQuarter.totalRewardAccrued);
+                pastQuarter.sharesGenerated = newShares;
+                _mint(address(this), newShares);
                 quarters[i + 1].totalShares = pastQuarter.totalShares + newShares;
                 quarters[i + 1].totalStaked = pastQuarter.totalStaked + pastQuarter.totalRewardAccrued;
             }
@@ -398,7 +400,7 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
             }
         }
 
-        // Step 2: When the previous quarters are processed and the shares and other relevant data are updaetd for the
+        // Step 2: When the previous quarters are processed and the shares and other relevant data are updated for the
         // current quarter
         // Then calculate the accRewardPerShare
         if (_quarter.totalShares > 0) {
@@ -412,10 +414,17 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         _quarter.lastUpdateTimestamp = block.timestamp;
     }
 
-    /// @dev Binary search to get the current quarter index, start timestamp and end timestamp
     function getCurrentQuarter() public view returns (bool valid, uint256 index, uint256 start, uint256 end) {
+        return getQuarter(block.timestamp);
+    }
+    /// @dev Binary search to get the current quarter index, start timestamp and end timestamp
+
+    function getQuarter(uint256 timestamp)
+        public
+        view
+        returns (bool valid, uint256 index, uint256 start, uint256 end)
+    {
         /// @todo remove the `flag` and just use if(block.timestmap < quarterTimestamp[0]) for legal/illegal
-        uint256 timestamp = block.timestamp;
         uint256 left = 0;
         uint256 right = quarterTimestamps.length - 1;
 
@@ -451,150 +460,56 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         return rewards;
     }
 
-    /**
-     * @notice Returns the balance of the user including the rewards converted to shares
-     */
-    function balanceOf(address account) public view override(ERC20Upgradeable, IERC20) returns (uint256) {
-        /**
-         * Logic Explanation:
-         *         1. Get the user's balance from the ERC20 contract which are the actual minted tokens. It comes from
-         * the quarters that are processed,
-         *             meaning the last time user did any action.
-         *         2. Then run a loop from, user's last interaction to the last any interaction happened in the
-         * contract. The reason is that, the quarter could be updated
-         *             by any user and that would have updated all the quarters till the current quarter. So, we need to
-         * calculate the rewards for the user from the last
-         *         3. Then if there are still some quarters left to process, then calculate the rewards without any loop
-         * because we already know the reward rate, the time elapsed
-         *             and the current total shares and staked data (which from last processed quarter).
-         */
-        uint256 userLastProcessed = userLastProcessedQuarter[account];
-
-        uint256 balance = userQuarterInfo[account][userLastProcessed].shares;
-
-        (bool isValid, uint256 currentQuarter, uint256 startTimestamp,) = getCurrentQuarter();
-        if (!isValid || userLastProcessed == currentQuarter) return balance;
-
-        // Step 1: Start from lastProcessed quarter where the user did the last action
-        uint256 processedQuarter = lastProcessedQuarter;
-        UserInfo memory _userInfo = userQuarterInfo[account][userLastProcessed];
-        Quarter memory _quarter = quarters[userLastProcessed];
-
-        // Step 1: Process the last interacted quarter first and settle that
-        uint256 accumulatedReward =
-            _userInfo.rewardAccrued + Math.mulDiv(balance, _quarter.accRewardPerShare, PRECISION) - _userInfo.rewardDebt;
-
-        uint256 newShares;
-
-        if (accumulatedReward > 0) {
-            newShares = _calculateSharesFromRewards(accumulatedReward, _quarter.totalShares, _quarter.totalStaked);
-            balance += newShares;
-        }
-
-        // Step 1: Run a loop to process the user rewards from the user's last processed quarter to the last processed
-        // global Quarter
-        for (uint256 i = userLastProcessed + 1; i < processedQuarter; i++) {
-            Quarter memory quarter = quarters[i];
-
-            accumulatedReward = Math.mulDiv(balance, quarter.accRewardPerShare, PRECISION);
-
-            if (accumulatedReward > 0) {
-                newShares = _calculateSharesFromRewards(accumulatedReward, quarter.totalShares, quarter.totalStaked);
-                balance += newShares;
-            }
-        }
-
-        // Step 2: From the there on to the current quarter calculate the rewards and shares without loop
-        _quarter = quarters[processedQuarter]; // TODO: confirm
-        uint256 totalRewards = calculateRewards(_quarter.lastUpdateTimestamp, startTimestamp);
-        uint256 accRewardPerShares =
-            _quarter.accRewardPerShare + Math.mulDiv(totalRewards, PRECISION, _quarter.totalShares);
-        balance += Math.mulDiv(accRewardPerShares, balance, PRECISION) - _userInfo.rewardDebt;
-
-        return balance;
-    }
-
-    function _calculateSharesFromRewards(
-        uint256 rewards,
-        uint256 shares,
-        uint256 staked
-    )
-        private
-        pure
-        returns (uint256)
-    {
-        if (staked == 0) return 0;
-        return Math.mulDiv(rewards, shares, staked);
-    }
-
     // Convert the rewards to shares
     function _processPendingRewards(address user, uint256 currentQuarter) internal {
         uint256 lastProcessed = userLastProcessedQuarter[user];
-        uint256 totalShares = userQuarterInfo[user][lastProcessed].shares;
+        uint256 userShares = userQuarterInfo[user][lastProcessed].shares;
+        uint256 initialShares = userShares;
+
+        for (uint256 i = lastProcessed; i < currentQuarter; i++) {
+            UserInfo storage userInfo = userQuarterInfo[user][i];
+            Quarter memory quarter = quarters[i];
+
+            if (userShares > 0) {
+                // Calculate the pending rewards: There is precision error of 1e-18
+                uint256 accumulatedReward = Math.mulDiv(userShares, quarter.accRewardPerShare, PRECISION);
+                userInfo.rewardAccrued += accumulatedReward - userInfo.rewardDebt;
+                userInfo.rewardDebt = accumulatedReward;
+                if (userInfo.rewardAccrued > 0) {
+                    // Convert the rewards to shares
+                    uint256 newShares =
+                        Math.mulDiv(userInfo.rewardAccrued, quarter.sharesGenerated, quarter.totalRewardAccrued);
+                    userQuarterInfo[user][i + 1].shares = userInfo.shares + newShares;
+                    userShares += newShares;
+                }
+            }
+            uint256 endTimestamp = quarterTimestamps[i + 1];
+            userInfo.lastUpdateTimestamp = endTimestamp;
+        }
+
+        // Transfer shares to the user
+        _transfer(address(this), user, userShares - initialShares);
+
         // Update the current quarter's user data with the last updated quarter's data
         UserInfo storage currentUserInfo = userQuarterInfo[user][currentQuarter];
 
-        // If all quarters are processed then don't do any processing
-        if (lastProcessed == currentQuarter) return;
-
-        for (uint256 i = lastProcessed; i < currentQuarter; i++) {
-            UserInfo memory userInfo = userQuarterInfo[user][i];
-            Quarter memory quarter = quarters[i];
-            // Calculate the pending rewards: There is precision error of 1e-18
-            uint256 accumulatedReward = Math.mulDiv(totalShares, quarter.accRewardPerShare, PRECISION);
-            uint256 pending = userQuarterInfo[user][i].rewardAccrued + accumulatedReward - userInfo.rewardDebt;
-            if (pending > 0) {
-                // Convert the pending rewards to shares
-                uint256 newShares = _calculateSharesFromRewards(pending, totalShares, quarter.totalStaked);
-                totalShares += newShares;
-            }
-
-            // Reset user's data for thran loop processed quarter
-            delete userQuarterInfo[user][i];
+        // @dev userShares = currentUserInfo.shares
+        if (userShares > 0) {
+            uint256 accReward = Math.mulDiv(userShares, quarters[currentQuarter].accRewardPerShare, PRECISION);
+            currentUserInfo.rewardAccrued += accReward - currentUserInfo.rewardDebt;
+            currentUserInfo.rewardDebt = accReward;
         }
 
-        // Mint shares for the user
-        _mint(user, totalShares);
-        currentUserInfo.shares = totalShares;
-        currentUserInfo.lastUpdateTimestamp = quarterTimestamps[currentQuarter];
+        currentUserInfo.lastUpdateTimestamp = block.timestamp;
         userLastProcessedQuarter[user] = currentQuarter;
-    }
-
-    /// @dev override totalSupply to return the total supply of the token
-    function totalSupply() public view override(ERC20Upgradeable, IERC20) returns (uint256) {
-        // Step 1: Initialize the `supply` variable with the last known supply from `Quarter` data
-        Quarter memory lastQuarter = quarters[lastProcessedQuarter];
-        uint256 supply = lastQuarter.totalShares;
-        (bool isValid,, uint256 startTimestamp,) = getCurrentQuarter();
-        if (!isValid) return supply;
-
-        // Step 2: Calculate the rewards for the last quarter and convert them to shares
-        if (lastQuarter.totalStaked > 0) {
-            uint256 rewardsAccumulated =
-                lastQuarter.totalRewardAccrued + calculateRewards(lastQuarter.lastUpdateTimestamp, startTimestamp);
-            uint256 shares = Math.mulDiv(rewardsAccumulated, lastQuarter.totalShares, lastQuarter.totalStaked);
-            supply += shares;
-        }
-
-        return supply;
     }
 
     /**
      * @notice Override the totalAssets to return the total assets staked in the contract
      */
     function totalAssets() public view virtual override returns (uint256) {
-        (bool isValid,, uint256 startTimestamp,) = getCurrentQuarter();
-        Quarter memory lastQuarter = quarters[lastProcessedQuarter];
-        uint256 totalStaked = lastQuarter.totalStaked;
-        if (!isValid) return totalStaked;
-
-        if (totalStaked > 0) {
-            uint256 rewardsAccumulated =
-                lastQuarter.totalRewardAccrued + calculateRewards(lastQuarter.lastUpdateTimestamp, startTimestamp);
-            totalStaked += rewardsAccumulated;
-        }
-
-        return totalStaked;
+        // TODO: Remove quarry assets
+        return super.totalAssets() - (lastQuaryRewards - claimedQuarryRewards);
     }
 
     /// @dev override _getVotingUnits to return the balance of the user
@@ -602,51 +517,65 @@ contract MortarStaking is Initializable, ERC4626Upgradeable, ERC20VotesUpgradeab
         return balanceOf(account);
     }
 
-    function decimals() public view virtual override(ERC4626Upgradeable, ERC20Upgradeable) returns (uint8) {
-        return super.decimals();
+    function claim(address account) external {
+        (bool isValid, uint256 index,,) = getCurrentQuarter();
+
+        if (!isValid) {
+            if (index == 0) return;
+            // @dev staking period is over, index is last quarter
+            if (
+                userQuarterInfo[account][userLastProcessedQuarter[account]].lastUpdateTimestamp
+                    >= quarterTimestamps[index + 1]
+            ) {
+                // user was updated already with last quarter data
+                // TODO: Check last quarter distribution
+                return;
+            }
+        }
+
+        _updateQuarter(index);
+        _processPendingRewards(account, index);
     }
 
-    function _update(
-        address from,
-        address to,
-        uint256 value
-    )
-        internal
-        virtual
-        override(ERC20VotesUpgradeable, ERC20Upgradeable)
-    {
-        super._update(from, to, value);
+    function addQuarryRewards(uint256 amount) external onlyRole(QUARRY_ROLE) {
+        if (claimedQuarryRewards != lastQuaryRewards) {
+            revert UnclaimedQuarryRewardsAssetsLeft();
+        }
+        lastQuaryRewards = amount;
+        claimedQuarryRewards = 0;
+        distributionTimestamp = block.timestamp;
+
+        SafeERC20.safeTransferFrom(IERC20(asset()), msg.sender, address(this), amount);
+        emit QuarryRewardsAdded(amount, distributionTimestamp);
     }
 
-    /**
-     * @dev Internal conversion function (from assets to shares) with support for rounding direction.
-     */
-    function _convertToShares(
-        uint256 assets,
-        Math.Rounding rounding
-    )
-        internal
-        view
-        virtual
-        override
-        returns (uint256)
-    {
-        return super._convertToShares(assets, rounding);
+    function claimQuarryRewards() external {
+        if (block.timestamp > distributionTimestamp + CLAIM_PERIOD) {
+            revert ClaimPeriodOver();
+        }
+        if (lastQuarryClaimedTimestamp[msg.sender] >= distributionTimestamp) {
+            revert QuarryRewardsAlreadyClaimed();
+        }
+
+        uint256 userShares = getPastVotes(msg.sender, distributionTimestamp);
+        uint256 totalShares = getPastTotalSupply(distributionTimestamp);
+        uint256 rewards = Math.mulDiv(userShares, lastQuaryRewards, totalShares);
+
+        if (rewards > 0) {
+            SafeERC20.safeTransfer(IERC20(asset()), msg.sender, rewards);
+            claimedQuarryRewards += rewards;
+        }
+        lastQuarryClaimedTimestamp[msg.sender] = distributionTimestamp;
+        emit QuarryRewardsClaimedQuarryRewards(msg.sender, rewards);
     }
 
-    /**
-     * @dev Internal conversion function (from shares to assets) with support for rounding direction.
-     */
-    function _convertToAssets(
-        uint256 shares,
-        Math.Rounding rounding
-    )
-        internal
-        view
-        virtual
-        override
-        returns (uint256)
-    {
-        return super._convertToAssets(shares, rounding);
+    function retrieveUnclaimedQuarryRewards() external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (block.timestamp <= distributionTimestamp + CLAIM_PERIOD) {
+            revert ClaimPeriodNotOver();
+        }
+        uint256 unclaimedQuarryRewards = lastQuaryRewards - claimedQuarryRewards;
+        claimedQuarryRewards = lastQuaryRewards;
+        SafeERC20.safeTransfer(IERC20(asset()), msg.sender, unclaimedQuarryRewards);
+        emit UnclaimedQuarryRewardsQuarryRewardsRetrieved(unclaimedQuarryRewards);
     }
 }
