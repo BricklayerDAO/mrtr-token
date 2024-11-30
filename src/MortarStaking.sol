@@ -569,7 +569,7 @@ contract MortarStaking is
         emit QuarryRewardsClaimedQuarryRewards(msg.sender, rewards);
     }
 
-    function retrieveUnclaimedQuarryRewardsQuarryRewards() external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function retrieveUnclaimedQuarryRewards() external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (block.timestamp <= distributionTimestamp + CLAIM_PERIOD) {
             revert ClaimPeriodNotOver();
         }
