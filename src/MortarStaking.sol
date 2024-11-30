@@ -10,7 +10,10 @@ import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/
 import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import { ERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
 import { AccessControlUpgradeable } from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { Time } from "@openzeppelin/contracts/utils/types/Time.sol";
+import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
+import { Checkpoints } from "@openzeppelin/contracts/utils/structs/Checkpoints.sol";
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 
 contract MortarStaking is
@@ -93,7 +96,7 @@ contract MortarStaking is
         __ERC20Votes_init();
         __ReentrancyGuard_init();
         __AccessControl_init();
-        
+
         // Grant admin role to the admin
         _grantRole(DEFAULT_ADMIN_ROLE, _admin);
 
@@ -330,10 +333,6 @@ contract MortarStaking is
         UserInfo storage _userInfo = userQuarterInfo[receiver][currentQuarter];
         Quarter storage _quarter = quarters[currentQuarter];
 
-        uint256 accruedReward =
-            Math.mulDiv(_userInfo.shares, _quarter.accRewardPerShare, PRECISION) - _userInfo.rewardDebt;
-        _userInfo.rewardAccrued += accruedReward;
-
         _userInfo.shares += shares;
         _userInfo.rewardDebt = Math.mulDiv(_userInfo.shares, _quarter.accRewardPerShare, PRECISION);
         _userInfo.lastUpdateTimestamp = block.timestamp;
@@ -348,10 +347,6 @@ contract MortarStaking is
     function _afterWithdrawOrRedeem(uint256 assets, uint256 shares, address owner, uint256 currentQuarter) private {
         UserInfo storage _userInfo = userQuarterInfo[owner][currentQuarter];
         Quarter storage _quarter = quarters[currentQuarter];
-
-        uint256 accruedReward =
-            Math.mulDiv(_userInfo.shares, _quarter.accRewardPerShare, PRECISION) - _userInfo.rewardDebt;
-        _userInfo.rewardAccrued += accruedReward;
 
         _userInfo.shares -= shares;
         _userInfo.rewardDebt = Math.mulDiv(_userInfo.shares, _quarter.accRewardPerShare, PRECISION);
@@ -368,19 +363,11 @@ contract MortarStaking is
         Quarter storage _quarter = quarters[currentQuarter];
 
         UserInfo storage senderInfo = userQuarterInfo[from][currentQuarter];
-        uint256 accruedReward =
-            Math.mulDiv(senderInfo.shares, _quarter.accRewardPerShare, PRECISION) - senderInfo.rewardDebt;
-
-        senderInfo.rewardAccrued += accruedReward;
         senderInfo.shares -= amount;
         senderInfo.rewardDebt = Math.mulDiv(senderInfo.shares, _quarter.accRewardPerShare, PRECISION);
         senderInfo.lastUpdateTimestamp = block.timestamp;
 
         UserInfo storage recipientInfo = userQuarterInfo[to][currentQuarter];
-        accruedReward =
-            Math.mulDiv(recipientInfo.shares, _quarter.accRewardPerShare, PRECISION) - recipientInfo.rewardDebt;
-
-        recipientInfo.rewardAccrued += accruedReward;
         recipientInfo.shares += amount;
         recipientInfo.rewardDebt = Math.mulDiv(recipientInfo.shares, _quarter.accRewardPerShare, PRECISION);
         recipientInfo.lastUpdateTimestamp = block.timestamp;
@@ -395,20 +382,15 @@ contract MortarStaking is
             Quarter storage pastQuarter = quarters[i];
             uint256 quarterEndTime = quarterTimestamps[i + 1];
 
-            // 1. Calculate rewards accrued since the last update to the end of the quarter
-            uint256 rewardsAccrued = calculateRewards(pastQuarter.lastUpdateTimestamp, quarterEndTime);
-            pastQuarter.totalRewardAccrued += rewardsAccrued;
-
-            // 2. Calculate accRewardPerShare BEFORE updating totalShares to prevent dilution
             if (pastQuarter.totalShares > 0) {
-                pastQuarter.accRewardPerShare =
-                    Math.mulDiv(pastQuarter.totalRewardAccrued, PRECISION, pastQuarter.totalShares);
-            } else {
-                pastQuarter.accRewardPerShare = 0;
-            }
+                // 1. Calculate rewards accrued since the last update to the end of the quarter
+                uint256 rewardsAccrued = calculateRewards(pastQuarter.lastUpdateTimestamp, quarterEndTime);
+                pastQuarter.totalRewardAccrued += rewardsAccrued;
 
-            // 3. Convert rewards to shares based on the current totalShares and totalStaked
-            if (pastQuarter.totalStaked > 0) {
+                // 2. Calculate accRewardPerShare BEFORE updating totalShares to prevent dilution
+                pastQuarter.accRewardPerShare += Math.mulDiv(rewardsAccrued, PRECISION, pastQuarter.totalShares);
+
+                // 3. Convert rewards to shares based on the current totalShares and totalStaked
                 uint256 newShares = _calculateSharesFromRewards(
                     pastQuarter.totalRewardAccrued, pastQuarter.totalShares, pastQuarter.totalStaked
                 );
@@ -423,7 +405,7 @@ contract MortarStaking is
             }
         }
 
-        // Step 2: When the previous quarters are processed and the shares and other relevant data are updaetd for the
+        // Step 2: When the previous quarters are processed and the shares and other relevant data are updated for the
         // current quarter
         // Then calculate the accRewardPerShare
         if (_quarter.totalShares > 0) {
@@ -437,10 +419,17 @@ contract MortarStaking is
         _quarter.lastUpdateTimestamp = block.timestamp;
     }
 
-    /// @dev Binary search to get the current quarter index, start timestamp and end timestamp
     function getCurrentQuarter() public view returns (bool valid, uint256 index, uint256 start, uint256 end) {
+        return getQuarter(block.timestamp);
+    }
+    /// @dev Binary search to get the current quarter index, start timestamp and end timestamp
+
+    function getQuarter(uint256 timestamp)
+        public
+        view
+        returns (bool valid, uint256 index, uint256 start, uint256 end)
+    {
         /// @todo remove the `flag` and just use if(block.timestmap < quarterTimestamp[0]) for legal/illegal
-        uint256 timestamp = block.timestamp;
         uint256 left = 0;
         uint256 right = quarterTimestamps.length - 1;
 
@@ -555,33 +544,44 @@ contract MortarStaking is
     // Convert the rewards to shares
     function _processPendingRewards(address user, uint256 currentQuarter) internal {
         uint256 lastProcessed = userLastProcessedQuarter[user];
-        uint256 totalShares = userQuarterInfo[user][lastProcessed].shares;
-        // Update the current quarter's user data with the last updated quarter's data
-        UserInfo storage currentUserInfo = userQuarterInfo[user][currentQuarter];
-
-        // If all quarters are processed then don't do any processing
-        if (lastProcessed == currentQuarter) return;
+        uint256 userShares = userQuarterInfo[user][lastProcessed].shares;
+        uint256 initialShares = userShares;
 
         for (uint256 i = lastProcessed; i < currentQuarter; i++) {
-            UserInfo memory userInfo = userQuarterInfo[user][i];
+            UserInfo storage userInfo = userQuarterInfo[user][i];
             Quarter memory quarter = quarters[i];
-            // Calculate the pending rewards: There is precision error of 1e-18
-            uint256 accumulatedReward = Math.mulDiv(totalShares, quarter.accRewardPerShare, PRECISION);
-            uint256 pending = userQuarterInfo[user][i].rewardAccrued + accumulatedReward - userInfo.rewardDebt;
-            if (pending > 0) {
-                // Convert the pending rewards to shares
-                uint256 newShares = _calculateSharesFromRewards(pending, totalShares, quarter.totalStaked);
-                totalShares += newShares;
-            }
 
-            // Reset user's data for thran loop processed quarter
-            delete userQuarterInfo[user][i];
+            if (userShares > 0) {
+                // Calculate the pending rewards: There is precision error of 1e-18
+                uint256 accumulatedReward = Math.mulDiv(userShares, quarter.accRewardPerShare, PRECISION);
+                userInfo.rewardAccrued += accumulatedReward - userInfo.rewardDebt;
+                userInfo.rewardDebt = accumulatedReward;
+                if (userInfo.rewardAccrued > 0) {
+                    // Convert the rewards to shares
+                    uint256 newShares =
+                        _calculateSharesFromRewards(userInfo.rewardAccrued, userShares, quarter.totalStaked);
+                    userQuarterInfo[user][i + 1].shares = userInfo.shares + newShares;
+                    userShares += newShares;
+                }
+            }
+            uint256 endTimestamp = quarterTimestamps[i + 1];
+            userInfo.lastUpdateTimestamp = endTimestamp;
         }
 
         // Mint shares for the user
-        _mint(user, totalShares);
-        currentUserInfo.shares = totalShares;
-        currentUserInfo.lastUpdateTimestamp = quarterTimestamps[currentQuarter];
+        _mint(user, userShares - initialShares);
+
+        // Update the current quarter's user data with the last updated quarter's data
+        UserInfo storage currentUserInfo = userQuarterInfo[user][currentQuarter];
+
+        // @dev userShares = currentUserInfo.shares
+        if (userShares > 0) {
+            uint256 accReward = Math.mulDiv(userShares, quarters[currentQuarter].accRewardPerShare, PRECISION);
+            currentUserInfo.rewardAccrued += accReward - currentUserInfo.rewardDebt;
+            currentUserInfo.rewardDebt = accReward;
+        }
+
+        currentUserInfo.lastUpdateTimestamp = block.timestamp;
         userLastProcessedQuarter[user] = currentQuarter;
     }
 
@@ -673,6 +673,102 @@ contract MortarStaking is
         returns (uint256)
     {
         return super._convertToAssets(shares, rounding);
+    }
+
+    function clock() public view override returns (uint48) {
+        return Time.timestamp();
+    }
+
+    // solhint-disable-next-line func-name-mixedcase
+    function CLOCK_MODE() public view override returns (string memory) {
+        // Check that the clock was not modified
+        if (clock() != Time.timestamp()) {
+            revert ERC6372InconsistentClock();
+        }
+        return "mode=timestamp";
+    }
+
+    function getPastVotes(address account, uint256 timepoint) public view override returns (uint256) {
+        uint48 currentTimepoint = clock();
+        if (timepoint >= currentTimepoint) {
+            revert ERC5805FutureLookup(timepoint, currentTimepoint);
+        }
+        if (timepoint < quarterTimestamps[0]) {
+            // No stake before the first quarter
+            return 0;
+        }
+        uint256 lo = 0;
+        uint256 hi = numCheckpoints(account);
+        if (hi == 0) {
+            // No checkpoints for the account => no stake
+            return 0;
+        }
+        Checkpoints.Checkpoint208 memory cp;
+        while (lo + 1 < hi) {
+            uint256 mid = Math.average(lo, hi);
+            cp = checkpoints(account, mid);
+            if (cp.key <= timepoint) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        cp = checkpoints(account, lo);
+        uint256 lastAction = cp.key;
+        if (lastAction > timepoint) {
+            // First operation after timepoint => no stake at timepoint
+            // @dev lo is 0 in this case
+            return 0;
+        }
+
+        if (lastAction >= quarterTimestamps[quarterTimestamps.length - 1]) {
+            // Last action is after the last quarter, everything is up to date
+            return cp.value;
+        }
+
+        uint256 timepointQuarter;
+        if (timepoint > quarterTimestamps[quarterTimestamps.length - 1]) {
+            timepointQuarter = quarterTimestamps.length - 1; // @dev last quarter + 1
+        } else {
+            (, timepointQuarter,,) = getQuarter(timepoint);
+        }
+        (, uint256 checkpointQuarter,,) = getQuarter(lastAction);
+
+        if (checkpointQuarter == timepointQuarter) {
+            // There is user interaction in the quarter before the timepoint
+            // then balance on checkpoint is up to date
+            return cp.value;
+        }
+
+        // compute missing shares not included in the checkpoint
+        // @dev checkpointQuarter < timepointQuarter
+        // No user interaction in quarters from checkpointQuarter to timepointQuarter
+        // @dev The checkpoint found is the one of the last interaction of the user in that quarter
+        // so the shares of the user in checkpoint = userQuarterInfo[user][checkpointQuarter].shares
+        uint256 userShares = userQuarterInfo[account][checkpointQuarter].shares;
+        // @dev lastProcessedQuarter >= checkpointQuarter
+        uint256 lastQuarter = lastProcessedQuarter;
+
+        // process any pending quarters while updating shares
+        uint256 i = checkpointQuarter;
+        while (i < timepointQuarter && i < lastQuarter) {
+            userShares += userQuarterInfo[account][i].shares;
+
+            unchecked {
+                ++i;
+            }
+        }
+
+        return userShares;
+    }
+
+    function getPastTotalSupply(uint256 timepoint) public view override returns (uint256) {
+        VotesStorage storage $ = _getVotesStorage();
+        uint48 currentTimepoint = clock();
+        if (timepoint >= currentTimepoint) {
+            revert ERC5805FutureLookup(timepoint, currentTimepoint);
+        }
+        return $._totalCheckpoints.upperLookupRecent(SafeCast.toUint48(timepoint));
     }
 
     function addQuarryRewards(uint256 amount) external onlyRole(QUARRY_ROLE) {
