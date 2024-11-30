@@ -50,19 +50,20 @@ contract MortarStaking is
     error ZeroAddress();
     error CannotWithdrawZero();
     error CannotRedeemZero();
-    error UnclaimedAssetsLeft();
+    error UnclaimedQuarryRewardsAssetsLeft();
     error ClaimPeriodNotOver();
     error ClaimPeriodOver();
-
+    error QuarryRewardsAlreadyClaimed();
     // Events
+
     event Deposited(address indexed user, uint256 assets, uint256 shares);
     event Minted(address indexed user, uint256 shares, uint256 assets);
     event Withdrawn(address indexed user, uint256 assets, uint256 shares);
     event Redeemed(address indexed user, uint256 shares, uint256 assets);
     event RewardDistributed(uint256 quarter, uint256 reward);
     event QuarryRewardsAdded(uint256 amount, uint256 distributionTimestamp);
-    event QuarryRewardsClaimed(address indexed user, uint256 amount);
-    event UnclaimedQuarryRewardsRetrieved(uint256 amount);
+    event QuarryRewardsClaimedQuarryRewards(address indexed user, uint256 amount);
+    event UnclaimedQuarryRewardsQuarryRewardsRetrieved(uint256 amount);
 
     // State Variables
     uint256 public rewardRate;
@@ -77,9 +78,10 @@ contract MortarStaking is
     uint256[] public quarterTimestamps;
 
     // Quary data
-    uint256 public lastQuaryReward;
+    uint256 public lastQuaryRewards;
     uint256 public distributionTimestamp;
-    uint256 public claimed;
+    uint256 public claimedQuarryRewards;
+    mapping(address => uint256) public lastQuarryClaimedTimestamp;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -507,7 +509,7 @@ contract MortarStaking is
      */
     function totalAssets() public view virtual override returns (uint256) {
         // TODO: Remove quarry assets
-        return super.totalAssets();
+        return super.totalAssets() - (lastQuaryRewards - claimedQuarryRewards);
     }
 
     /// @dev override _getVotingUnits to return the balance of the user
@@ -535,24 +537,12 @@ contract MortarStaking is
         _processPendingRewards(account, index);
     }
 
-    function clock() public view override returns (uint48) {
-        return Time.timestamp();
-    }
-
-    // solhint-disable-next-line func-name-mixedcase
-    function CLOCK_MODE() public view override returns (string memory) {
-        // Check that the clock was not modified
-        if (clock() != Time.timestamp()) {
-            revert ERC6372InconsistentClock();
-        }
-        return "mode=timestamp";
-    }
-
     function addQuarryRewards(uint256 amount) external onlyRole(QUARRY_ROLE) {
-        if (claimed != lastQuaryReward) {
-            revert UnclaimedAssetsLeft();
+        if (claimedQuarryRewards != lastQuaryRewards) {
+            revert UnclaimedQuarryRewardsAssetsLeft();
         }
-        lastQuaryReward = amount;
+        lastQuaryRewards = amount;
+        claimedQuarryRewards = 0;
         distributionTimestamp = block.timestamp;
 
         SafeERC20.safeTransferFrom(IERC20(asset()), msg.sender, address(this), amount);
@@ -563,26 +553,29 @@ contract MortarStaking is
         if (block.timestamp > distributionTimestamp + CLAIM_PERIOD) {
             revert ClaimPeriodOver();
         }
+        if (lastQuarryClaimedTimestamp[msg.sender] >= distributionTimestamp) {
+            revert QuarryRewardsAlreadyClaimed();
+        }
 
-        // TODO: I think following 2 voting functions will not work
         uint256 userShares = getPastVotes(msg.sender, distributionTimestamp);
         uint256 totalShares = getPastTotalSupply(distributionTimestamp);
-        uint256 rewards = Math.mulDiv(userShares, lastQuaryReward, totalShares);
+        uint256 rewards = Math.mulDiv(userShares, lastQuaryRewards, totalShares);
 
         if (rewards > 0) {
             SafeERC20.safeTransfer(IERC20(asset()), msg.sender, rewards);
-            claimed += rewards;
-            emit QuarryRewardsClaimed(msg.sender, rewards);
+            claimedQuarryRewards += rewards;
         }
+        lastQuarryClaimedTimestamp[msg.sender] = distributionTimestamp;
+        emit QuarryRewardsClaimedQuarryRewards(msg.sender, rewards);
     }
 
-    function retrieveUnclaimedQuarryRewards() external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function retrieveUnclaimedQuarryRewardsQuarryRewards() external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (block.timestamp <= distributionTimestamp + CLAIM_PERIOD) {
             revert ClaimPeriodNotOver();
         }
-        uint256 unclaimed = lastQuaryReward - claimed;
-        claimed = lastQuaryReward;
-        SafeERC20.safeTransfer(IERC20(asset()), msg.sender, unclaimed);
-        emit UnclaimedQuarryRewardsRetrieved(unclaimed);
+        uint256 unclaimedQuarryRewards = lastQuaryRewards - claimedQuarryRewards;
+        claimedQuarryRewards = lastQuaryRewards;
+        SafeERC20.safeTransfer(IERC20(asset()), msg.sender, unclaimedQuarryRewards);
+        emit UnclaimedQuarryRewardsQuarryRewardsRetrieved(unclaimedQuarryRewards);
     }
 }
