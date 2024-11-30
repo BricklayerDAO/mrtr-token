@@ -238,7 +238,6 @@ contract MortarStaking is
         if (receiver == address(0)) revert ZeroAddress();
 
         (uint256 currentQuarter,,) = getCurrentQuarter();
-        if (!_isStakingAllowed()) revert InvalidStakingPeriod();
 
         _updateQuarter(currentQuarter);
         _processPendingRewards(owner, currentQuarter);
@@ -283,7 +282,6 @@ contract MortarStaking is
         returns (bool)
     {
         (uint256 currentQuarter,,) = getCurrentQuarter();
-        if (!_isStakingAllowed()) revert InvalidStakingPeriod();
 
         _updateQuarter(currentQuarter);
         _processPendingRewards(msg.sender, currentQuarter);
@@ -309,7 +307,6 @@ contract MortarStaking is
         returns (bool)
     {
         (uint256 currentQuarter,,) = getCurrentQuarter();
-        if (!_isStakingAllowed()) revert InvalidStakingPeriod();
 
         _updateQuarter(currentQuarter);
         _processPendingRewards(from, currentQuarter);
@@ -369,6 +366,9 @@ contract MortarStaking is
     }
 
     function _updateQuarter(uint256 currentQuarterIndex) internal {
+        // If all quarters are already processed, return
+        if (lastProcessedQuarter == 80) return;
+
         Quarter storage _quarter = quarters[currentQuarterIndex];
 
         // Step 1: Process previous quarters if any that are unprocessed and update the current quarter with the
@@ -420,11 +420,7 @@ contract MortarStaking is
     }
 
     /// @dev Binary search to get the quarter index, start timestamp and end timestamp
-    function getQuarter(uint256 timestamp)
-        public
-        view
-        returns (uint256 index, uint256 start, uint256 end)
-    {
+    function getQuarter(uint256 timestamp) public view returns (uint256 index, uint256 start, uint256 end) {
         /// @todo remove the `flag` and just use if(block.timestmap < quarterTimestamp[0]) for legal/illegal
         uint256 left = 0;
         uint256[] memory arr = quarterTimestamps;
@@ -443,13 +439,11 @@ contract MortarStaking is
         // Check if we're in a valid staking period
         if (timestamp >= arr[0] && timestamp < arr[arr.length - 1]) {
             uint256 quarterIndex = left > 0 ? left - 1 : 0;
-            return ( quarterIndex, arr[quarterIndex], arr[quarterIndex + 1]);
+            return (quarterIndex, arr[quarterIndex], arr[quarterIndex + 1]);
         }
 
         if (timestamp >= arr[arr.length - 1]) {
-            return (
-                arr.length - 1, arr[arr.length - 1], type(uint256).max
-            );
+            return (arr.length - 1, 0, 0);
         }
 
         return (0, 0, 0);
@@ -465,6 +459,8 @@ contract MortarStaking is
     // Convert the rewards to shares
     function _processPendingRewards(address user, uint256 currentQuarter) internal {
         uint256 lastProcessed = userLastProcessedQuarter[user];
+        if (lastProcessed == 80) return;
+
         uint256 userShares = userQuarterInfo[user][lastProcessed].shares;
         uint256 initialShares = userShares;
 
@@ -582,6 +578,7 @@ contract MortarStaking is
     }
 
     function _isStakingAllowed() public view returns (bool) {
-        return block.timestamp >= quarterTimestamps[0] && block.timestamp < quarterTimestamps[quarterTimestamps.length - 1];
+        return
+            block.timestamp >= quarterTimestamps[0] && block.timestamp < quarterTimestamps[quarterTimestamps.length - 1];
     }
 }
