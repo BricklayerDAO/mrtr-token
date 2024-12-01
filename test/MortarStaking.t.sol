@@ -346,7 +346,7 @@ contract MortarStakingTesting is Test {
         vm.warp(firstQuarterEndTime + 1);
 
         // Send rewards to treasury
-        token.mint(staking.treasury(), 2775662503807493146176000);
+        token.mint(staking.treasury(), 2_775_662_503_807_493_146_176_000);
 
         staking.claim(alice);
     }

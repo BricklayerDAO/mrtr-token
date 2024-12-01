@@ -85,6 +85,11 @@ contract MortarStaking is
     uint256 public claimedQuarryRewards;
     mapping(address => uint256) public lastQuarryClaimedTimestamp;
 
+    modifier onlyStakingPeriod() {
+        _onlyStakingPeriod();
+        _;
+    }
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
@@ -199,12 +204,20 @@ contract MortarStaking is
     /**
      * @notice Deposits assets and stakes them, receiving shares in return.
      */
-    function deposit(uint256 assets, address receiver) public override nonReentrant returns (uint256) {
+    function deposit(
+        uint256 assets,
+        address receiver
+    )
+        public
+        override
+        nonReentrant
+        onlyStakingPeriod
+        returns (uint256)
+    {
         if (assets == 0) revert CannotStakeZero();
         if (receiver == address(0)) revert ZeroAddress();
 
         (uint256 currentQuarter,,) = getCurrentQuarter();
-        if (!_isStakingAllowed()) revert InvalidStakingPeriod();
 
         _updateQuarter(currentQuarter);
         _processPendingRewards(receiver, currentQuarter);
@@ -217,12 +230,11 @@ contract MortarStaking is
     /**
      * @notice Mints shares by depositing the equivalent assets.
      */
-    function mint(uint256 shares, address receiver) public override nonReentrant returns (uint256) {
+    function mint(uint256 shares, address receiver) public override nonReentrant onlyStakingPeriod returns (uint256) {
         if (shares == 0) revert CannotStakeZero();
         if (receiver == address(0)) revert ZeroAddress();
 
         (uint256 currentQuarter,,) = getCurrentQuarter();
-        if (!_isStakingAllowed()) revert InvalidStakingPeriod();
 
         _updateQuarter(currentQuarter);
         _processPendingRewards(receiver, currentQuarter);
@@ -261,7 +273,6 @@ contract MortarStaking is
         if (receiver == address(0)) revert ZeroAddress();
 
         (uint256 currentQuarter,,) = getCurrentQuarter();
-        if (!_isStakingAllowed()) revert InvalidStakingPeriod();
 
         _updateQuarter(currentQuarter);
         _processPendingRewards(owner, currentQuarter);
@@ -574,8 +585,9 @@ contract MortarStaking is
         emit UnclaimedQuarryRewardsQuarryRewardsRetrieved(unclaimedQuarryRewards);
     }
 
-    function _isStakingAllowed() public view returns (bool) {
-        return
-            block.timestamp >= quarterTimestamps[0] && block.timestamp < quarterTimestamps[quarterTimestamps.length - 1];
+    function _onlyStakingPeriod() internal view {
+        if (
+            block.timestamp < quarterTimestamps[0] || block.timestamp >= quarterTimestamps[quarterTimestamps.length - 1]
+        ) revert InvalidStakingPeriod();
     }
 }

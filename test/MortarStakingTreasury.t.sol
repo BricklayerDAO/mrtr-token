@@ -1,9 +1,9 @@
 pragma solidity 0.8.26;
 
-import {Test} from "forge-std/Test.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {ERC20, IERC20Errors} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import {MortarStakingTreasury, Ownable} from "../src/MortarStakingTreasury.sol";
+import { Test } from "forge-std/Test.sol";
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { ERC20, IERC20Errors } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import { MortarStakingTreasury, Ownable } from "../src/MortarStakingTreasury.sol";
 
 contract MockERC20 is ERC20 {
     constructor() ERC20("Mock Token", "MTK") { }
@@ -22,7 +22,7 @@ contract MortarStakingTreasuryTest is Test {
     address public attacker;
 
     uint256 public initialTreasuryBalance = 1_000_000 * 10 ** 18; // 1 million tokens
-    
+
     event StakingContractSet(address indexed oldContract, address indexed newContract);
     event TokensWithdrawn(address indexed to, uint256 amount);
     event TokensPulled(address indexed to, uint256 amount);
@@ -73,7 +73,11 @@ contract MortarStakingTreasuryTest is Test {
 
         assetToken.mint(address(treasury), balance);
 
-        vm.expectRevert(abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, address(treasury), balance, withdrawAmount));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IERC20Errors.ERC20InsufficientBalance.selector, address(treasury), balance, withdrawAmount
+            )
+        );
         vm.prank(owner);
         treasury.withdraw(owner, withdrawAmount);
     }

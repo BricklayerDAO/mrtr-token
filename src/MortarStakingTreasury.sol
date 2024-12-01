@@ -21,10 +21,11 @@ contract MortarStakingTreasury is Ownable {
      * @notice Initializes the treasury with an asset token
      * @param _assetToken The ERC20 token to be managed by this treasury
      */
+
     constructor(IERC20 _assetToken, address admin) Ownable(admin) {
         if (address(_assetToken) == address(0)) revert ZeroAddress();
         assetToken = _assetToken;
-        
+
         assetToken.approve(msg.sender, type(uint256).max);
     }
 
