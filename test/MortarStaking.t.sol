@@ -56,60 +56,52 @@ contract MortarStakingTesting is Test {
         uint256 start;
         uint256 end;
         uint256 quarter;
-        bool valid;
 
         // Case 1: Before staking period
         vm.warp(1_735_084_799); // 1 second before first quarter starts
-        (valid, quarter, start, end) = staking.getCurrentQuarter();
-        assertFalse(valid, "Before staking period: should be invalid quarter");
+        (quarter, start, end) = staking.getCurrentQuarter();
         assertEq(quarter, 0, "Before staking period: incorrect quarter");
         assertEq(start, 0, "Before staking period: incorrect start");
         assertEq(end, 0, "Before staking period: incorrect end");
 
         // Case 2: First quarter
         vm.warp(1_735_084_800);
-        (valid, quarter, start, end) = staking.getCurrentQuarter();
-        assertTrue(valid, "First quarter: should be valid quarter");
+        (quarter, start, end) = staking.getCurrentQuarter();
         assertEq(quarter, 0, "First quarter: incorrect quarter");
         assertEq(start, 1_735_084_800, "First quarter: incorrect start");
         assertEq(end, 1_742_860_800, "First quarter: incorrect end");
 
         // Case 3: Middle of first quarter
         vm.warp(1_738_972_800);
-        (valid, quarter, start, end) = staking.getCurrentQuarter();
-        assertTrue(valid, "Middle of first quarter: should be valid quarter");
+        (quarter, start, end) = staking.getCurrentQuarter();
         assertEq(quarter, 0, "Middle of first quarter: incorrect quarter");
         assertEq(start, 1_735_084_800, "Middle of first quarter: incorrect start");
         assertEq(end, 1_742_860_800, "Middle of first quarter: incorrect end");
 
         // Case 4: Middle quarter
         vm.warp(2_050_252_800);
-        (valid, quarter, start, end) = staking.getCurrentQuarter();
-        assertTrue(valid, "Middle quarter: should be valid quarter");
+        (quarter, start, end) = staking.getCurrentQuarter();
         assertEq(quarter, 40, "Middle quarter: incorrect quarter");
         assertEq(start, 2_050_252_800, "Middle quarter: incorrect start");
         assertEq(end, 2_058_028_800, "Middle quarter: incorrect end");
 
         // Case 5: Last quarter
         vm.warp(2_358_000_001);
-        (valid, quarter, start, end) = staking.getCurrentQuarter();
-        assertTrue(valid, "Last quarter: should be valid quarter");
+        (quarter, start, end) = staking.getCurrentQuarter();
         assertEq(quarter, 79, "Last quarter: incorrect quarter");
         assertEq(start, 2_358_000_000, "Last quarter: incorrect start");
         assertEq(end, 2_365_420_800, "Last quarter: incorrect end");
 
         // Case 6: After staking period
         vm.warp(2_365_420_801);
-        (valid, quarter, start, end) = staking.getCurrentQuarter();
-        assertFalse(valid, "After staking period: should be invalid quarter");
-        assertEq(quarter, 79, "After staking period: incorrect quarter");
-        assertEq(start, 2_365_420_800, "After staking period: incorrect start");
-        assertEq(end, type(uint256).max, "After staking period: incorrect end");
+        (quarter, start, end) = staking.getCurrentQuarter();
+        assertEq(quarter, 80, "After staking period: incorrect quarter");
+        assertEq(start, 0, "After staking period: incorrect start");
+        assertEq(end, 0, "After staking period: incorrect end");
 
         // Case 7: Exact quarter boundary
         vm.warp(1_742_860_800);
-        (valid, quarter, start, end) = staking.getCurrentQuarter();
-        assertTrue(valid, "Second quarter: should be valid quarter");
+        (quarter, start, end) = staking.getCurrentQuarter();
         assertEq(quarter, 1, "Quarter boundary: incorrect quarter");
         assertEq(start, 1_742_860_800, "Quarter boundary: incorrect start");
         assertEq(end, 1_748_822_400, "Quarter boundary: incorrect end");
@@ -194,17 +186,12 @@ contract MortarStakingTesting is Test {
         uint256 startTime = staking.quarterTimestamps(0) + 1;
         vm.warp(startTime);
 
-        // Log initial state
-        (bool flag, uint256 currentQuarter, uint256 start, uint256 end) = staking.getCurrentQuarter();
-
         // Test with just one deposit first
         vm.prank(alice);
         staking.deposit(100 ether, alice);
         // Check Alice's balance
         uint256 aliceBalance = staking.balanceOf(alice);
         assertEq(aliceBalance, 100 ether, "Alice's initial deposit failed");
-
-        (flag, currentQuarter, start, end) = staking.getCurrentQuarter();
     }
 
     function testDepositInFirstQuarter() public {
@@ -342,21 +329,26 @@ contract MortarStakingTesting is Test {
         );
     }
 
-    function testTotalBalance() public {
+    function testClaimRewards() public {
         // Warp to the middle of the first quarter
         uint256 firstQuarterStartTime = staking.quarterTimestamps(0);
         uint256 firstQuarterEndTime = staking.quarterTimestamps(1);
         uint256 timeInFirstQuarter = firstQuarterStartTime + (firstQuarterEndTime - firstQuarterStartTime) / 2;
         vm.warp(timeInFirstQuarter);
 
-        uint256 aliceDeposit1 = 100 ether;
+        uint256 depositAmount = 100 ether;
 
         // Alice deposits in the first quarter
         vm.prank(alice);
-        staking.deposit(aliceDeposit1, alice);
+        staking.deposit(depositAmount, alice);
+
+        // Warp to the end of the first quarter
         vm.warp(firstQuarterEndTime + 1);
-        vm.prank(alice);
-        staking.deposit(aliceDeposit1, alice);
+
+        // Send rewards to treasury
+        token.mint(staking.treasury(), 2775662503807493146176000);
+
+        staking.claim(alice);
     }
 
     function testBalanceOf() public { }
