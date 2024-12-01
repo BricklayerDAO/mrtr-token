@@ -106,7 +106,7 @@ contract MortarStaking is
         _grantRole(DEFAULT_ADMIN_ROLE, _admin);
         // Set treasury contract
         treasury = _treasury;
-        quarterTimestamps =         quarterTimestamps = [
+        quarterTimestamps = [
             1_735_084_800, // Quarter 1 start
             1_742_860_800, // Quarter 1 end
             1_748_822_400, // Quarter 2 end
