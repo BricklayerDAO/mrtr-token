@@ -271,6 +271,11 @@ contract MortarStaking is
      * @dev Handles post-transfer actions.
      */
     function _afterTransfer(address from, address to, uint256 amount, uint256 currentQuarter) internal {
+        // If all quarters are processed already then don't update the user data
+        /// @dev We check only for `from` because, in the transfer function, the `to` would also be updated if `from` is
+        /// updated till the current quarter
+        if (userLastProcessedQuarter[from] == 80) return;
+
         Quarter storage _quarter = quarters[currentQuarter];
 
         UserInfo storage senderInfo = userQuarterInfo[from][currentQuarter];
