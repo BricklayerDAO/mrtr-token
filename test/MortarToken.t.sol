@@ -29,7 +29,7 @@ contract MRTRTokenTest is Test {
 
         // Deploy proxy
         bytes memory initData =
-            abi.encodeWithSelector(MRTRToken.initialize.selector, stakingPool, daoTreasury, presalePool);
+            abi.encodeWithSelector(MRTRToken.initialize.selector, stakingPool, daoTreasury, presalePool, owner);
 
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
 
@@ -71,6 +71,6 @@ contract MRTRTokenTest is Test {
 
     function test_DoubleInitializationReverts() public {
         vm.expectRevert();
-        token.initialize(stakingPool, daoTreasury, presalePool);
+        token.initialize(stakingPool, daoTreasury, presalePool, owner);
     }
 }

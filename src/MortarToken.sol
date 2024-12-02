@@ -17,9 +17,17 @@ contract MRTRToken is Initializable, ERC20Upgradeable, OwnableUpgradeable {
         _disableInitializers();
     }
 
-    function initialize(address stakingPool, address daoTreasury, address presalePool) public initializer {
+    function initialize(
+        address stakingPool,
+        address daoTreasury,
+        address presalePool,
+        address admin
+    )
+        public
+        initializer
+    {
         __ERC20_init("Mortar", "MRTR");
-        __Ownable_init(msg.sender);
+        __Ownable_init(admin);
 
         // Initial token distribution
         _mint(stakingPool, 450_000_000 ether); // Staking Rewards Pool

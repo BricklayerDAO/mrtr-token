@@ -17,7 +17,8 @@ contract DeployMRTR is Script {
             MRTRToken.initialize.selector,
             vm.envAddress("STAKING_POOL"),
             vm.envAddress("DAO_TREASURY"),
-            vm.envAddress("PRESALE_POOL")
+            vm.envAddress("PRESALE_POOL"),
+            vm.envAddress("ADMIN")
         );
         address implementation = address(new MRTRToken());
         address token = address(new TransparentUpgradeableProxy(implementation, vm.envAddress("ADMIN"), data));
