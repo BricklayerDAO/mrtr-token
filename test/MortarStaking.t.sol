@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import "forge-std/Test.sol";
-import "forge-std/console.sol";
-import "../src/MortarStaking.sol";
-import "../src/MortarStakingTreasury.sol";
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
-import "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol";
+import { Test } from "forge-std/Test.sol";
+import { MortarStaking } from "../src/MortarStaking.sol";
+import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import { TransparentUpgradeableProxy } from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 
 contract MockERC20 is ERC20 {
     constructor() ERC20("Mock Token", "MTK") { }
@@ -18,14 +15,11 @@ contract MockERC20 is ERC20 {
 }
 
 contract MortarStakingTesting is Test {
-    MortarStaking public stakingImplementation;
     MortarStaking public staking;
     MockERC20 public token;
-    ProxyAdmin public proxyAdmin;
-    TransparentUpgradeableProxy public proxy;
-    address alice = address(0x1);
-    address bob = address(0x2);
-    address carol = address(0x3);
+    address alice = makeAddr("alice");
+    address bob = makeAddr("bob");
+    address carol = makeAddr("carol");
     uint256 quarterLength = 81;
 
     event Deposited(address indexed user, uint256 assets, uint256 shares);
@@ -33,12 +27,15 @@ contract MortarStakingTesting is Test {
 
     function setUp() public {
         token = new MockERC20();
-        stakingImplementation = new MortarStaking();
-        proxyAdmin = new ProxyAdmin(address(this));
+        vm.label(address(token), "token");
+
+        address stakingImplementation = address(new MortarStaking());
         // Encode initialization data
         bytes memory initData = abi.encodeWithSelector(MortarStaking.initialize.selector, address(token), address(this));
-        proxy = new TransparentUpgradeableProxy(address(stakingImplementation), address(proxyAdmin), initData);
-        staking = MortarStaking(address(proxy));
+        address proxy = address(new TransparentUpgradeableProxy(stakingImplementation, address(this), initData));
+        staking = MortarStaking(proxy);
+        vm.label(address(staking), "staking");
+        vm.label(staking.treasury(), "treasury");
 
         // Mint tokens for test users
         token.mint(alice, 1000 ether);
@@ -59,7 +56,7 @@ contract MortarStakingTesting is Test {
         token.approve(address(staking), type(uint256).max);
     }
 
-    function test_getCurrentQuarter() public {
+    function testGetCurrentQuarter() public {
         uint256 start;
         uint256 end;
         uint256 quarter;

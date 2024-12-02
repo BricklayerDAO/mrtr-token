@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "forge-std/Test.sol";
-import "../src/MortarToken.sol";
-import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import { Test } from "forge-std/Test.sol";
+import { MRTRToken } from "../src/MortarToken.sol";
+import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 
 contract MRTRTokenTest is Test {
     MRTRToken public implementation;
@@ -39,38 +39,38 @@ contract MRTRTokenTest is Test {
 
     function test_InitialSetup() public view {
         // Test token metadata
-        assertEq(token.name(), "Mortar");
-        assertEq(token.symbol(), "MRTR");
-        assertEq(token.decimals(), 18);
+        assertEq(token.name(), "Mortar", "Incorrect token name");
+        assertEq(token.symbol(), "MRTR", "Incorrect token symbol");
+        assertEq(token.decimals(), 18, "Incorrect token decimals");
 
         // Test distribution
-        assertEq(token.balanceOf(stakingPool), 450_000_000 * 1e18);
-        assertEq(token.balanceOf(daoTreasury), 500_000_000 * 1e18);
-        assertEq(token.balanceOf(presalePool), 50_000_000 * 1e18);
+        assertEq(token.balanceOf(stakingPool), 450_000_000 * 1e18, "Incorrect staking pool balance");
+        assertEq(token.balanceOf(daoTreasury), 500_000_000 * 1e18, "Incorrect DAO treasury balance");
+        assertEq(token.balanceOf(presalePool), 50_000_000 * 1e18, "Incorrect presale pool balance");
 
-        assertEq(token.totalSupply(), 1_000_000_000 * 1e18);
+        assertEq(token.totalSupply(), 1_000_000_000 * 1e18, "Incorrect total supply");
     }
 
-    function test_Burn() public {
+    function testBurn() public {
         // Send user1 some tokens
         vm.prank(stakingPool);
         token.transfer(user1, 1000 * 1e18);
 
         // Test burn
-        vm.startPrank(user1);
+        vm.prank(user1);
         vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", address(user1)));
         token.burn(user1, 500 * 1e18);
-        vm.stopPrank();
+
         vm.prank(owner);
         token.burn(user1, 500 * 1e18);
 
         // Verify balance and total supply
-        assertEq(token.balanceOf(user1), 500 * 1e18);
-        assertEq(token.totalSupply(), 999_999_500 * 1e18);
+        assertEq(token.balanceOf(user1), 500 * 1e18, "Incorrect user1 balance");
+        assertEq(token.totalSupply(), 999_999_500 * 1e18, "Incorrect total supply");
     }
 
-    function test_DoubleInitializationReverts() public {
-        vm.expectRevert();
+    function testDoubleInitializationReverts() public {
+        vm.expectRevert(abi.encodeWithSignature("InvalidInitialization()"));
         token.initialize(stakingPool, daoTreasury, presalePool, owner);
     }
 }

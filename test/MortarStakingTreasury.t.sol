@@ -41,7 +41,11 @@ contract MortarStakingTreasuryTest is Test {
     }
 
     function testAllowanceIsSetForDeployer() public view {
-        assertEq(assetToken.allowance(address(treasury), address(this)), type(uint256).max);
+        assertEq(
+            assetToken.allowance(address(treasury), address(this)),
+            type(uint256).max,
+            "Allowance for deployer is not set correctly"
+        );
     }
 
     function testWithdrawTokensByOwner(uint256 balance, uint256 withdrawAmount) public {
@@ -55,7 +59,7 @@ contract MortarStakingTreasuryTest is Test {
         vm.prank(owner);
         treasury.withdraw(owner, withdrawAmount);
 
-        assertEq(assetToken.balanceOf(owner), withdrawAmount);
+        assertEq(assetToken.balanceOf(owner), withdrawAmount, "Owner's balance after withdrawal is incorrect");
     }
 
     function testWithdrawTokensByNonOwner(address nonOwner, address receiver, uint256 withdrawAmount) public {
