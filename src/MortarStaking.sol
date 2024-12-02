@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import "forge-std/console.sol";
-import { IMortarStakingTreasury } from "./interfaces/IMortarStakingTreasury.sol";
+import { MortarStakingTreasury } from "./MortarStakingTreasury.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { ERC4626Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
@@ -70,7 +69,7 @@ contract MortarStaking is
     // State Variables
     uint256 public rewardRate;
     uint256 public lastProcessedQuarter;
-    IMortarStakingTreasury public treasury;
+    address public treasury;
 
     // Mappings
     mapping(uint256 => Quarter) public quarters;
@@ -86,6 +85,11 @@ contract MortarStaking is
     uint256 public claimedQuarryRewards;
     mapping(address => uint256) public lastQuarryClaimedTimestamp;
 
+    modifier onlyStakingPeriod() {
+        _onlyStakingPeriod();
+        _;
+    }
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
@@ -94,8 +98,9 @@ contract MortarStaking is
     /**
      * @dev Initializes the contract with the given asset.
      * @param _asset The ERC20 asset to be staked.
+     * @param _admin The address of the admin.
      */
-    function initialize(IERC20 _asset, IMortarStakingTreasury _treasury, address _admin) external initializer {
+    function initialize(IERC20 _asset, address _admin) external initializer {
         __ERC4626_init(_asset);
         __ERC20_init("XMortar", "xMRTR");
         __Votes_init();
@@ -104,8 +109,10 @@ contract MortarStaking is
 
         // Grant admin role to the admin
         _grantRole(DEFAULT_ADMIN_ROLE, _admin);
-        // Set treasury contract
-        treasury = _treasury;
+
+        // Deploy the treasury contract
+        treasury = address(new MortarStakingTreasury(_asset, _admin));
+
         quarterTimestamps = [
             1_735_084_800, // Quarter 1 start
             1_742_860_800, // Quarter 1 end
@@ -197,12 +204,20 @@ contract MortarStaking is
     /**
      * @notice Deposits assets and stakes them, receiving shares in return.
      */
-    function deposit(uint256 assets, address receiver) public override nonReentrant returns (uint256) {
+    function deposit(
+        uint256 assets,
+        address receiver
+    )
+        public
+        override
+        nonReentrant
+        onlyStakingPeriod
+        returns (uint256)
+    {
         if (assets == 0) revert CannotStakeZero();
         if (receiver == address(0)) revert ZeroAddress();
 
         (uint256 currentQuarter,,) = getCurrentQuarter();
-        if (!_isStakingAllowed()) revert InvalidStakingPeriod();
 
         _updateQuarter(currentQuarter);
         _processPendingRewards(receiver, currentQuarter);
@@ -215,12 +230,11 @@ contract MortarStaking is
     /**
      * @notice Mints shares by depositing the equivalent assets.
      */
-    function mint(uint256 shares, address receiver) public override nonReentrant returns (uint256) {
+    function mint(uint256 shares, address receiver) public override nonReentrant onlyStakingPeriod returns (uint256) {
         if (shares == 0) revert CannotStakeZero();
         if (receiver == address(0)) revert ZeroAddress();
 
         (uint256 currentQuarter,,) = getCurrentQuarter();
-        if (!_isStakingAllowed()) revert InvalidStakingPeriod();
 
         _updateQuarter(currentQuarter);
         _processPendingRewards(receiver, currentQuarter);
@@ -259,7 +273,6 @@ contract MortarStaking is
         if (receiver == address(0)) revert ZeroAddress();
 
         (uint256 currentQuarter,,) = getCurrentQuarter();
-        if (!_isStakingAllowed()) revert InvalidStakingPeriod();
 
         _updateQuarter(currentQuarter);
         _processPendingRewards(owner, currentQuarter);
@@ -399,7 +412,7 @@ contract MortarStaking is
                 pastQuarter.sharesGenerated = newShares;
                 // Mint the shares and pull reward tokens from the treasury
                 _mint(address(this), newShares);
-                treasury.pullTokens(address(this), pastQuarter.totalRewardAccrued);
+                SafeERC20.safeTransferFrom(IERC20(asset()), treasury, address(this), pastQuarter.totalRewardAccrued);
                 // Update the next quarter's totalShares and totalStaked
                 quarters[i + 1].totalShares = pastQuarter.totalShares + newShares;
                 quarters[i + 1].totalStaked = pastQuarter.totalStaked + pastQuarter.totalRewardAccrued;
@@ -573,8 +586,9 @@ contract MortarStaking is
         emit UnclaimedQuarryRewardsQuarryRewardsRetrieved(unclaimedQuarryRewards);
     }
 
-    function _isStakingAllowed() public view returns (bool) {
-        return
-            block.timestamp >= quarterTimestamps[0] && block.timestamp < quarterTimestamps[quarterTimestamps.length - 1];
+    function _onlyStakingPeriod() internal view {
+        if (
+            block.timestamp < quarterTimestamps[0] || block.timestamp >= quarterTimestamps[quarterTimestamps.length - 1]
+        ) revert InvalidStakingPeriod();
     }
 }

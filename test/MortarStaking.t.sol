@@ -555,10 +555,15 @@ contract MortarStakingTesting is Test {
 
         // Alice deposits in the first quarter
         vm.prank(alice);
-        staking.deposit(aliceDeposit1, alice);
+        staking.deposit(depositAmount, alice);
+
+        // Warp to the end of the first quarter
         vm.warp(firstQuarterEndTime + 1);
-        vm.prank(alice);
-        staking.deposit(aliceDeposit1, alice);
+
+        // Send rewards to treasury
+        token.mint(staking.treasury(), 2_775_662_503_807_493_146_176_000);
+
+        staking.claim(alice);
     }
 
     function testBalanceOf() public { }
