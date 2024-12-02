@@ -41,7 +41,7 @@ Add values to each of the variables there except for `MRTR_TOKEN`.
 ### MRTR Token
 
 ```bash
-forge script script/DeployMRTR.s.sol:DeployMRTR --rpc-url $RPC_URL --broadcast
+forge script script/DeployMRTR.s.sol:DeployMRTR --rpc-url $RPC_URL --private-key $PRIVATE_KEY --broadcast
 ```
 
 You will see the contract address in the displayed output. Add it to your `.env` file as `MRTR_TOKEN` before deploying the staking contract.
@@ -49,7 +49,7 @@ You will see the contract address in the displayed output. Add it to your `.env`
 ### Staking
 
 ```bash
-forge script script/DeployStaking.s.sol:DeployStaking --rpc-url $RPC_URL --broadcast
+forge script script/DeployStaking.s.sol:DeployStaking --rpc-url $RPC_URL --private-key $PRIVATE_KEY --broadcast
 ```
 
 You will see the contract address in the displayed output.
