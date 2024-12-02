@@ -7,7 +7,7 @@ import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/I
 
 /**
  * @title MRTR Token
- * @dev Implementation of the MRTR token with burnable and upgradable
+ * @dev Implementation of the MRTR token with burnable and upgradable features.
  */
 contract MRTRToken is Initializable, ERC20Upgradeable, OwnableUpgradeable {
     uint256 private constant TOTAL_SUPPLY = 1_000_000_000 ether; // 1 billion tokens with 18 decimals
@@ -17,6 +17,13 @@ contract MRTRToken is Initializable, ERC20Upgradeable, OwnableUpgradeable {
         _disableInitializers();
     }
 
+    /**
+     * @dev Initializes the contract with the initial token distribution.
+     * @param stakingPool The address of the staking pool to receive tokens.
+     * @param daoTreasury The address of the DAO treasury to receive tokens.
+     * @param presalePool The address of the presale pool to receive tokens.
+     * @param admin The address of the admin.
+     */
     function initialize(
         address stakingPool,
         address daoTreasury,
@@ -35,6 +42,11 @@ contract MRTRToken is Initializable, ERC20Upgradeable, OwnableUpgradeable {
         _mint(presalePool, 50_000_000 ether); // Presale Pool
     }
 
+    /**
+     * @dev Burns a specified amount of tokens from the specified account.
+     * @param _account The address from which to burn tokens.
+     * @param _amount The amount of tokens to burn.
+     */
     function burn(address _account, uint256 _amount) public onlyOwner {
         _burn(_account, _amount);
     }

@@ -17,11 +17,12 @@ contract MortarStakingTreasury is Ownable {
     // Custom errors
     error ZeroAddress();
     error InvalidAmount();
+
     /**
      * @notice Initializes the treasury with an asset token
      * @param _assetToken The ERC20 token to be managed by this treasury
+     * @param admin The address of the admin
      */
-
     constructor(IERC20 _assetToken, address admin) Ownable(admin) {
         if (address(_assetToken) == address(0)) revert ZeroAddress();
         assetToken = _assetToken;

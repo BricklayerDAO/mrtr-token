@@ -204,6 +204,8 @@ contract MortarStaking is
 
     /**
      * @notice Deposits assets and stakes them, receiving shares in return.
+     * @param assets The amount of assets to deposit.
+     * @param receiver The address that will receive the shares.
      */
     function deposit(
         uint256 assets,
@@ -232,6 +234,8 @@ contract MortarStaking is
 
     /**
      * @notice Mints shares by depositing the equivalent assets.
+     * @param shares The amount of shares to mint.
+     * @param receiver The address that will receive the assets.
      */
     function mint(uint256 shares, address receiver) public override nonReentrant onlyStakingPeriod returns (uint256) {
         if (shares == 0) revert CannotStakeZero();
@@ -252,6 +256,9 @@ contract MortarStaking is
 
     /**
      * @notice Withdraws staked assets by burning shares.
+     * @param assets The amount of assets to withdraw.
+     * @param receiver The address that will receive the assets.
+     * @param owner The address that owns the shares.
      */
     function withdraw(uint256 assets, address receiver, address owner) public override nonReentrant returns (uint256) {
         if (assets == 0) revert CannotWithdrawZero();
@@ -272,6 +279,9 @@ contract MortarStaking is
 
     /**
      * @notice Redeems shares to withdraw the equivalent staked assets.
+     * @param shares The amount of shares to redeem.
+     * @param receiver The address that will receive the assets.
+     * @param owner The address that owns the shares.
      */
     function redeem(uint256 shares, address receiver, address owner) public override nonReentrant returns (uint256) {
         if (shares == 0) revert CannotRedeemZero();
@@ -292,6 +302,8 @@ contract MortarStaking is
 
     /**
      * @notice Transfers tokens and updates rewards for sender and receiver.
+     * @param to The address to transfer the tokens to.
+     * @param amount The amount of tokens to transfer.
      */
     function transfer(
         address to,
@@ -316,6 +328,9 @@ contract MortarStaking is
 
     /**
      * @notice Transfers tokens on behalf of another address and updates rewards.
+     * @param from The address to transfer the tokens from.
+     * @param to The address to transfer the tokens to.
+     * @param amount The amount of tokens to transfer.
      */
     function transferFrom(
         address from,
@@ -342,6 +357,10 @@ contract MortarStaking is
 
     /**
      * @notice Handles post-deposit or mint actions.
+     * @param assets The amount of assets deposited or minted.
+     * @param shares The amount of shares received.
+     * @param receiver The address that received the assets or shares.
+     * @param currentQuarter The index of the current quarter.
      */
     function _afterDepositOrMint(
         StakingStorage storage $,
@@ -365,6 +384,10 @@ contract MortarStaking is
 
     /**
      * @notice Handles post-withdraw or redeem actions.
+     * @param assets The amount of assets withdrawn or redeemed.
+     * @param shares The amount of shares burned.
+     * @param owner The address that owns the shares.
+     * @param currentQuarter The index of the current quarter.
      */
     function _afterWithdrawOrRedeem(
         StakingStorage storage $,
@@ -388,6 +411,10 @@ contract MortarStaking is
 
     /**
      * @dev Handles post-transfer actions.
+     * @param from The address from which the assets are transferred.
+     * @param to The address to which the assets are transferred.
+     * @param amount The amount of assets transferred.
+     * @param currentQuarter The index of the current quarter.
      */
     function _afterTransfer(
         StakingStorage storage $,
@@ -416,6 +443,10 @@ contract MortarStaking is
         recipientInfo.lastUpdateTimestamp = block.timestamp;
     }
 
+    /**
+     * @dev Updates the quarter data.
+     * @param currentQuarterIndex The index of the current quarter.
+     */
     function _updateQuarter(StakingStorage storage $, uint256 currentQuarterIndex) internal {
         // If all quarters are already processed, return
         if ($.lastProcessedQuarter == 80) return;
@@ -469,12 +500,17 @@ contract MortarStaking is
         _quarter.lastUpdateTimestamp = block.timestamp;
     }
 
-    /// @notice Gives quarter index data for the current timestamp
+    /**
+     * @notice Gives quarter index data for the current timestamp
+     */
     function getCurrentQuarter() external view returns (uint256 index, uint256 start, uint256 end) {
         StakingStorage storage $ = _getStakingStorage();
         return _getCurrentQuarter($);
     }
 
+    /**
+     * @dev Gets the current quarter index, start timestamp and end timestamp.
+     */
     function _getCurrentQuarter(StakingStorage storage $)
         internal
         view
@@ -483,12 +519,20 @@ contract MortarStaking is
         return _getQuarter($, block.timestamp);
     }
 
-    /// @dev Binary search to get the quarter index, start timestamp and end timestamp
+    /**
+     * @dev Gets the quarter index, start timestamp and end timestamp for a given timestamp.
+     * @param timestamp The timestamp for which to get the quarter data.
+     */
     function getQuarter(uint256 timestamp) external view returns (uint256 index, uint256 start, uint256 end) {
         StakingStorage storage $ = _getStakingStorage();
         return _getQuarter($, timestamp);
     }
 
+    /**
+     * @dev Gets the quarter index, start timestamp and end timestamp for a given timestamp.
+     * @param $ The storage slot of the StakingStorage.
+     * @param timestamp The timestamp for which to get the quarter data.
+     */
     function _getQuarter(
         StakingStorage storage $,
         uint256 timestamp
@@ -524,19 +568,32 @@ contract MortarStaking is
         return (0, 0, 0);
     }
 
-    /// @notice calculate the rewards for the given duration
+    /**
+     * @dev Calculates the rewards for the given duration.
+     * @param start The start timestamp.
+     * @param end The end timestamp.
+     */
     function calculateRewards(uint256 start, uint256 end) external view returns (uint256) {
         StakingStorage storage $ = _getStakingStorage();
         return _calculateRewards($, start, end);
     }
 
+    /**
+     * @dev Calculates the rewards for the given duration.
+     * @param start The start timestamp.
+     * @param end The end timestamp.
+     */
     function _calculateRewards(StakingStorage storage $, uint256 start, uint256 end) internal view returns (uint256) {
         if (start > end) return 0;
         uint256 rewards = $.rewardRate * (end - start);
         return rewards;
     }
 
-    // Convert the rewards to shares
+    /**
+     * @dev Processes the pending rewards for a user.
+     * @param user The address of the user.
+     * @param currentQuarter The index of the current quarter.
+     */
     function _processPendingRewards(StakingStorage storage $, address user, uint256 currentQuarter) internal {
         uint256 lastProcessed = $.userLastProcessedQuarter[user];
         if (lastProcessed == 80) return;
@@ -582,18 +639,27 @@ contract MortarStaking is
     }
 
     /**
-     * @notice Override the totalAssets to return the total assets staked in the contract
+     * @notice Override the totalAssets to return the total assets staked in the contract.
+     * @return The total assets staked in the contract.
      */
     function totalAssets() public view virtual override returns (uint256) {
         StakingStorage storage $ = _getStakingStorage();
         return super.totalAssets() - ($.lastQuaryRewards - $.claimedQuarryRewards);
     }
 
-    /// @dev override _getVotingUnits to return the balance of the user
+    /**
+     * @dev Override the _getVotingUnits to return the balance of the user.
+     * @param account The address of the user.
+     * @return The balance of the user.
+     */
     function _getVotingUnits(address account) internal view override returns (uint256) {
         return balanceOf(account);
     }
 
+    /**
+     * @dev Claims the staking rewards for a user.
+     * @param account The address of the user.
+     */
     function claim(address account) external {
         StakingStorage storage $ = _getStakingStorage();
         (uint256 index,,) = _getCurrentQuarter($);
@@ -601,6 +667,10 @@ contract MortarStaking is
         _processPendingRewards($, account, index);
     }
 
+    /**
+     * @dev Adds quarry rewards to the contract.
+     * @param amount The amount of rewards to add.
+     */
     function addQuarryRewards(uint256 amount) external onlyRole(QUARRY_ROLE) {
         StakingStorage storage $ = _getStakingStorage();
         if ($.claimedQuarryRewards != $.lastQuaryRewards) {
@@ -614,12 +684,16 @@ contract MortarStaking is
         emit QuarryRewardsAdded(amount, $.distributionTimestamp);
     }
 
-    function claimQuarryRewards() external {
+    /**
+     * @dev Claims the quarry rewards for a user.
+     * @param user The address of the user.
+     */
+    function claimQuarryRewards(address user) external {
         StakingStorage storage $ = _getStakingStorage();
         if (block.timestamp > $.distributionTimestamp + CLAIM_PERIOD) {
             revert ClaimPeriodOver();
         }
-        if ($.lastQuarryClaimedTimestamp[msg.sender] >= $.distributionTimestamp) {
+        if ($.lastQuarryClaimedTimestamp[user] >= $.distributionTimestamp) {
             revert QuarryRewardsAlreadyClaimed();
         }
 
@@ -631,10 +705,13 @@ contract MortarStaking is
             SafeERC20.safeTransfer(IERC20(asset()), msg.sender, rewards);
             $.claimedQuarryRewards += rewards;
         }
-        $.lastQuarryClaimedTimestamp[msg.sender] = $.distributionTimestamp;
-        emit QuarryRewardsClaimedQuarryRewards(msg.sender, rewards);
+        $.lastQuarryClaimedTimestamp[user] = $.distributionTimestamp;
+        emit QuarryRewardsClaimedQuarryRewards(user, rewards);
     }
 
+    /**
+     * @dev Retrieves the unclaimed quarry rewards.
+     */
     function retrieveUnclaimedQuarryRewards() external onlyRole(DEFAULT_ADMIN_ROLE) {
         StakingStorage storage $ = _getStakingStorage();
         if (block.timestamp <= $.distributionTimestamp + CLAIM_PERIOD) {
@@ -646,6 +723,9 @@ contract MortarStaking is
         emit UnclaimedQuarryRewardsQuarryRewardsRetrieved(unclaimedQuarryRewards);
     }
 
+    /**
+     * @dev Checks if the current timestamp is within the staking period.
+     */
     function _onlyStakingPeriod() internal view {
         StakingStorage storage $ = _getStakingStorage();
         if (
@@ -654,12 +734,18 @@ contract MortarStaking is
         ) revert InvalidStakingPeriod();
     }
 
-    /// @dev Override the clock function to return the block timestamp
+    /**
+     * @dev Override the clock function to return the block timestamp.
+     * @return The block timestamp.
+     */
     function clock() public view virtual override returns (uint48) {
         return Time.timestamp();
     }
 
-    /// @dev Override the clock mode to return the timestamp
+    /**
+     * @dev Override the clock mode to return the timestamp.
+     * @return The clock mode.
+     */
     // solhint-disable-next-line func-name-mixedcase
     function CLOCK_MODE() public view virtual override returns (string memory) {
         // Check that the clock was not modified
@@ -669,32 +755,60 @@ contract MortarStaking is
         return "mode=timestamp";
     }
 
+    /**
+     * @dev Gets the storage slot of the StakingStorage.
+     * @return $ The storage slot of the StakingStorage.
+     */
     function _getStakingStorage() internal pure returns (StakingStorage storage $) {
         assembly {
             $.slot := MortarStakingStorageLocation
         }
     }
 
+    /**
+     * @dev Gets the treasury address.
+     * @return The treasury address.
+     */
     function treasury() public view returns (address) {
         StakingStorage storage $ = _getStakingStorage();
         return $.treasury;
     }
 
+    /**
+     * @dev Gets the quarter timestamp at a given index.
+     * @param index The index of the quarter.
+     * @return The quarter timestamp.
+     */
     function quarterTimestamps(uint256 index) public view returns (uint256) {
         StakingStorage storage $ = _getStakingStorage();
         return $.quarterTimestamps[index];
     }
 
+    /**
+     * @dev Gets the reward rate.
+     * @return The reward rate.
+     */
     function rewardRate() public view returns (uint256) {
         StakingStorage storage $ = _getStakingStorage();
         return $.rewardRate;
     }
 
+    /**
+     * @dev Gets the user's quarter info.
+     * @param user The address of the user.
+     * @param quarter The index of the quarter.
+     * @return The user's quarter info.
+     */
     function userQuarterInfo(address user, uint256 quarter) public view returns (UserInfo memory) {
         StakingStorage storage $ = _getStakingStorage();
         return $.userQuarterInfo[user][quarter];
     }
 
+    /**
+     * @dev Gets the quarter data at a given index.
+     * @param index The index of the quarter.
+     * @return The quarter data.
+     */
     function quarters(uint256 index) public view returns (Quarter memory) {
         StakingStorage storage $ = _getStakingStorage();
         return $.quarters[index];
