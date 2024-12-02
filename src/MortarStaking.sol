@@ -591,4 +591,19 @@ contract MortarStaking is
             block.timestamp < quarterTimestamps[0] || block.timestamp >= quarterTimestamps[quarterTimestamps.length - 1]
         ) revert InvalidStakingPeriod();
     }
+
+    /// @dev Override the clock function to return the block timestamp
+    function clock() public view virtual override returns (uint48) {
+        return SafeCast.toUint48(block.timestamp);
+    }
+
+    /// @dev Override the clock mode to return the timestamp
+    // solhint-disable-next-line func-name-mixedcase
+    function CLOCK_MODE() public view virtual override returns (string memory) {
+        // Check that the clock was not modified
+        if (clock() != block.timestamp) {
+            revert ERC6372InconsistentClock();
+        }
+        return "mode=timestamp&from=default";
+    }
 }
