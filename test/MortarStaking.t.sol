@@ -623,12 +623,11 @@ contract MortarStakingTesting is Test {
 
     function testTransferAfterStakingPeriod() public {
         // Define the first quarter's start and end times
-        uint256 firstQuarterStartTime = staking.quarterTimestamps(0);
-        uint256 firstQuarterEndTime = staking.quarterTimestamps(1);
         uint256 stakingEndTime = staking.quarterTimestamps(quarterLength - 1);
 
         // Calculate deposit timestamps
-        uint256 aliceDepositTimestamp = firstQuarterStartTime + (firstQuarterEndTime - firstQuarterStartTime) / 2; // Middle
+        uint256 aliceDepositTimestamp =
+            staking.quarterTimestamps(0) + (staking.quarterTimestamps(1) - staking.quarterTimestamps(0)) / 2; // Middle
             // of the quarter
         uint256 bobDepositTimestamp = aliceDepositTimestamp + 20; // 20 seconds after Alice
 
@@ -650,8 +649,7 @@ contract MortarStakingTesting is Test {
         vm.warp(stakingEndTime);
 
         // Transfer 50% of Alice's shares to Bob
-        uint256 aliceBalance = staking.balanceOf(alice);
-        uint256 transferAmount = aliceBalance / 2;
+        uint256 transferAmount = staking.balanceOf(alice) / 2;
 
         vm.prank(alice);
         staking.claim(alice);
