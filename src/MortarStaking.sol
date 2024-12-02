@@ -388,7 +388,6 @@ contract MortarStaking is
     function _updateQuarter(uint256 currentQuarterIndex) internal {
         // If all quarters are already processed, return
         if (lastProcessedQuarter == 80) return;
-
         Quarter storage _quarter = quarters[currentQuarterIndex];
 
         // Step 1: Process previous quarters if any that are unprocessed and update the current quarter with the
@@ -604,6 +603,6 @@ contract MortarStaking is
         if (clock() != block.timestamp) {
             revert ERC6372InconsistentClock();
         }
-        return "mode=timestamp&from=default";
+        return "mode=timestamp";
     }
 }
