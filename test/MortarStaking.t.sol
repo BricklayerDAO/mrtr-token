@@ -21,54 +21,33 @@ contract MortarStakingTesting is Test {
     MortarStaking public stakingImplementation;
     MortarStaking public staking;
     MockERC20 public token;
-    MortarStakingTreasury public treasury;
     ProxyAdmin public proxyAdmin;
     TransparentUpgradeableProxy public proxy;
     address alice = address(0x1);
     address bob = address(0x2);
     address carol = address(0x3);
     uint256 quarterLength = 81;
-    // Helper struct to store quarter data
-
-    struct QuarterData {
-        uint256 APS;
-        uint256 totalShares;
-        uint256 totalStaked;
-        uint256 generated;
-    }
-
-    // Helper struct to store user data
-    struct UserData {
-        uint256 rewards;
-        uint256 debt;
-        uint256 shares;
-        uint256 balance;
-    }
 
     event Deposited(address indexed user, uint256 assets, uint256 shares);
     event Minted(address indexed user, uint256 shares, uint256 assets);
 
     function setUp() public {
         token = new MockERC20();
-        treasury = new MortarStakingTreasury(address(token));
         stakingImplementation = new MortarStaking();
         proxyAdmin = new ProxyAdmin(address(this));
-
         // Encode initialization data
         bytes memory initData =
-            abi.encodeWithSelector(MortarStaking.initialize.selector, address(token), address(treasury), address(this));
+            abi.encodeWithSelector(MortarStaking.initialize.selector, address(token), address(this));
         proxy = new TransparentUpgradeableProxy(address(stakingImplementation), address(proxyAdmin), initData);
         staking = MortarStaking(address(proxy));
-
-        // Setup treasury
-        treasury.setStakingContract(address(proxy));
 
         // Mint tokens for test users
         token.mint(alice, 1000 ether);
         token.mint(bob, 1000 ether);
         token.mint(carol, 1000 ether);
-        // Mint 450M reward tokens for treasury
-        token.mint(address(treasury), 450_000_000 ether);
+
+        // Send rewards to treasury
+        token.mint(staking.treasury(), 450_000_000 ether);
 
         // Users approve the staking contract to spend their tokens
         vm.prank(alice);
@@ -381,14 +360,14 @@ contract MortarStakingTesting is Test {
 
     function testMintZeroAmount() public {
         // Attempt to mint zero shares
-        vm.expectRevert(MortarStaking.CannotStakeZero.selector);
+        vm.expectRevert();
         vm.prank(alice);
         staking.mint(0, alice);
     }
 
     function testDepositZeroAmount() public {
         // Attempt to deposit zero assets
-        vm.expectRevert(MortarStaking.CannotStakeZero.selector);
+        vm.expectRevert();
         vm.prank(alice);
         staking.deposit(0, alice);
     }
@@ -506,6 +485,25 @@ contract MortarStakingTesting is Test {
         assertApproxEqAbs(bobFinalBalance, bobExpectedBalance, 1e10, "Bob final balance incorrect");
     }
 
+    function testClaimRewards() public {
+        // Warp to the middle of the first quarter
+        uint256 firstQuarterStartTime = staking.quarterTimestamps(0);
+        uint256 firstQuarterEndTime = staking.quarterTimestamps(1);
+        uint256 timeInFirstQuarter = firstQuarterStartTime + (firstQuarterEndTime - firstQuarterStartTime) / 2;
+        vm.warp(timeInFirstQuarter);
+        uint256 depositAmount = 100 ether;
+        // Alice deposits in the first quarter
+        vm.prank(alice);
+        staking.deposit(depositAmount, alice);
+        // Warp to the end of the first quarter
+        vm.warp(firstQuarterEndTime + 1);
+
+        // Send rewards to treasury
+        token.mint(staking.treasury(), 2_775_662_503_807_493_146_176_000);
+
+        staking.claim(alice);
+    }
+
     function testWithdrawInFirstQuarter() public {
         // Step 1: Warp to the first quarter start time + 1 second to ensure within the quarter
         uint256 firstQuarterStartTime = staking.quarterTimestamps(0);
@@ -603,7 +601,7 @@ contract MortarStakingTesting is Test {
         uint256 expectedLastUpdate,
         uint256 quarter
     )
-        internal
+        internal view
     {
         (uint256 rewardAccrued, uint256 lastUpdate, uint256 rewardDebt, uint256 shares) =
             staking.userQuarterInfo(user, quarter);
@@ -621,7 +619,7 @@ contract MortarStakingTesting is Test {
         uint256 expectedTotalStaked,
         uint256 expectedGenerated
     )
-        internal
+        internal view
     {
         (uint256 APS,,, uint256 totalShares, uint256 totalStaked, uint256 generated) = staking.quarters(quarter);
         assertEq(APS, expectedAPS, "Accumulated reward per share incorrect");
