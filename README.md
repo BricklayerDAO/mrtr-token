@@ -30,7 +30,33 @@ Implementation of a staking contract and token with autorestaking. Rewards are d
 
 ## Deployment
 
-// TODO: Add deployment script and update this section
+You can start by creating your `.env` file based on `.env.example`.
+
+```bash
+cp .env.example .env
+```
+
+Add values to each of the variables there except for `MRTR_TOKEN`.
+
+### MRTR Token
+
+```bash
+forge script script/DeployMRTR.s.sol:DeployMRTR --rpc-url $RPC_URL --broadcast
+```
+
+You will see the contract address in the displayed output. Add it to your `.env` file as `MRTR_TOKEN` before deploying the staking contract.
+
+### Staking
+
+```bash
+forge script script/DeployStaking.s.sol:DeployStaking --rpc-url $RPC_URL --broadcast
+```
+
+You will see the contract address in the displayed output.
+
+### Verification
+
+Make sure to add the `--verify` flag if you want the contracts to be verified. You will need an Etherscan API key configured in your `foundry.toml` file or pass it as a flag to the command. Check verification docs in Foundry book for more details.
 
 ## Testing
 
