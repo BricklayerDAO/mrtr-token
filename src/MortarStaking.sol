@@ -39,11 +39,32 @@ contract MortarStaking is
         uint256 shares;
     }
 
+    /// @custom:storage-location erc7201:bricklayerDAO.storage.MortarStaking
+    struct StakingStorage {
+        uint256 rewardRate;
+        uint256 lastProcessedQuarter;
+        address treasury;
+        // Mappings
+        mapping(uint256 => Quarter) quarters;
+        mapping(address => mapping(uint256 => UserInfo)) userQuarterInfo;
+        mapping(address => uint256) userLastProcessedQuarter;
+        // Array of quarter end timestamps
+        uint256[] quarterTimestamps;
+        // Quary data
+        uint256 lastQuaryRewards;
+        uint256 distributionTimestamp;
+        uint256 claimedQuarryRewards;
+        mapping(address => uint256) lastQuarryClaimedTimestamp;
+    }
+
     // Constants
     uint256 private constant TOTAL_REWARDS = 450_000_000 ether;
     uint256 private constant PRECISION = 1e18;
     uint256 private constant CLAIM_PERIOD = 30 days;
     bytes32 public constant QUARRY_ROLE = keccak256("QUARRY_ROLE");
+    // keccak256(abi.encode(uint256(keccak256("bricklayerDAO.storage.MortarStaking")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant MortarStakingStorageLocation =
+        0xeb60ae2f593341966fbcbc1f5990151523f8acd89874031aa83b032b2e04cc00;
 
     // Custom Errors
     error InvalidStakingPeriod();
@@ -65,25 +86,6 @@ contract MortarStaking is
     event QuarryRewardsAdded(uint256 amount, uint256 distributionTimestamp);
     event QuarryRewardsClaimedQuarryRewards(address indexed user, uint256 amount);
     event UnclaimedQuarryRewardsQuarryRewardsRetrieved(uint256 amount);
-
-    // State Variables
-    uint256 public rewardRate;
-    uint256 public lastProcessedQuarter;
-    address public treasury;
-
-    // Mappings
-    mapping(uint256 => Quarter) public quarters;
-    mapping(address => mapping(uint256 => UserInfo)) public userQuarterInfo;
-    mapping(address => uint256) public userLastProcessedQuarter;
-
-    // Array of quarter end timestamps
-    uint256[] public quarterTimestamps;
-
-    // Quary data
-    uint256 public lastQuaryRewards;
-    uint256 public distributionTimestamp;
-    uint256 public claimedQuarryRewards;
-    mapping(address => uint256) public lastQuarryClaimedTimestamp;
 
     modifier onlyStakingPeriod() {
         _onlyStakingPeriod();
@@ -110,10 +112,12 @@ contract MortarStaking is
         // Grant admin role to the admin
         _grantRole(DEFAULT_ADMIN_ROLE, _admin);
 
-        // Deploy the treasury contract
-        treasury = address(new MortarStakingTreasury(_asset, _admin));
+        StakingStorage storage $ = _getStakingStorage();
 
-        quarterTimestamps = [
+        $.treasury = address(new MortarStakingTreasury(_asset, _admin));
+        // Quarter is open set of the time period
+        // E.g., (1_735_084_800 + 1) to (1_742_860_800 - 1) is first quarter
+        $.quarterTimestamps = [
             1_735_084_800, // Quarter 1 start
             1_742_860_800, // Quarter 1 end
             1_748_822_400, // Quarter 2 end
@@ -197,8 +201,8 @@ contract MortarStaking is
             2_365_420_800 // Quarter 80 end
         ];
         // Initialize reward rate
-        uint256 totalDuration = quarterTimestamps[quarterTimestamps.length - 1] - quarterTimestamps[0];
-        rewardRate = TOTAL_REWARDS / totalDuration;
+        uint256 totalDuration = $.quarterTimestamps[$.quarterTimestamps.length - 1] - $.quarterTimestamps[0];
+        $.rewardRate = TOTAL_REWARDS / totalDuration;
     }
 
     /**
@@ -217,12 +221,14 @@ contract MortarStaking is
         if (assets == 0) revert CannotStakeZero();
         if (receiver == address(0)) revert ZeroAddress();
 
-        (uint256 currentQuarter,,) = getCurrentQuarter();
+        StakingStorage storage $ = _getStakingStorage();
 
-        _updateQuarter(currentQuarter);
-        _processPendingRewards(receiver, currentQuarter);
+        (uint256 currentQuarter,,) = _getCurrentQuarter($);
+
+        _updateQuarter($, currentQuarter);
+        _processPendingRewards($, receiver, currentQuarter);
         uint256 shares = super.deposit(assets, receiver);
-        _afterDepositOrMint(assets, shares, receiver, currentQuarter);
+        _afterDepositOrMint($, assets, shares, receiver, currentQuarter);
         emit Deposited(receiver, assets, shares);
         return shares;
     }
@@ -234,13 +240,14 @@ contract MortarStaking is
         if (shares == 0) revert CannotStakeZero();
         if (receiver == address(0)) revert ZeroAddress();
 
-        (uint256 currentQuarter,,) = getCurrentQuarter();
+        StakingStorage storage $ = _getStakingStorage();
+        (uint256 currentQuarter,,) = _getCurrentQuarter($);
 
-        _updateQuarter(currentQuarter);
-        _processPendingRewards(receiver, currentQuarter);
+        _updateQuarter($, currentQuarter);
+        _processPendingRewards($, receiver, currentQuarter);
 
         uint256 assets = super.mint(shares, receiver);
-        _afterDepositOrMint(assets, shares, receiver, currentQuarter);
+        _afterDepositOrMint($, assets, shares, receiver, currentQuarter);
 
         emit Minted(receiver, shares, assets);
         return assets;
@@ -253,13 +260,14 @@ contract MortarStaking is
         if (assets == 0) revert CannotWithdrawZero();
         if (receiver == address(0)) revert ZeroAddress();
 
-        (uint256 currentQuarter,,) = getCurrentQuarter();
+        StakingStorage storage $ = _getStakingStorage();
+        (uint256 currentQuarter,,) = _getCurrentQuarter($);
 
-        _updateQuarter(currentQuarter);
-        _processPendingRewards(owner, currentQuarter);
+        _updateQuarter($, currentQuarter);
+        _processPendingRewards($, owner, currentQuarter);
 
         uint256 shares = super.withdraw(assets, receiver, owner);
-        _afterWithdrawOrRedeem(assets, shares, owner, currentQuarter);
+        _afterWithdrawOrRedeem($, assets, shares, owner, currentQuarter);
 
         emit Withdrawn(owner, assets, shares);
         return shares;
@@ -272,13 +280,14 @@ contract MortarStaking is
         if (shares == 0) revert CannotRedeemZero();
         if (receiver == address(0)) revert ZeroAddress();
 
-        (uint256 currentQuarter,,) = getCurrentQuarter();
+        StakingStorage storage $ = _getStakingStorage();
+        (uint256 currentQuarter,,) = _getCurrentQuarter($);
 
-        _updateQuarter(currentQuarter);
-        _processPendingRewards(owner, currentQuarter);
+        _updateQuarter($, currentQuarter);
+        _processPendingRewards($, owner, currentQuarter);
 
         uint256 assets = super.redeem(shares, receiver, owner);
-        _afterWithdrawOrRedeem(assets, shares, owner, currentQuarter);
+        _afterWithdrawOrRedeem($, assets, shares, owner, currentQuarter);
 
         emit Redeemed(owner, shares, assets);
         return assets;
@@ -296,13 +305,13 @@ contract MortarStaking is
         nonReentrant
         returns (bool)
     {
-        (uint256 currentQuarter,,) = getCurrentQuarter();
+        StakingStorage storage $ = _getStakingStorage();
+        (uint256 currentQuarter,,) = _getCurrentQuarter($);
 
-        _updateQuarter(currentQuarter);
-
-        _processPendingRewards(msg.sender, currentQuarter);
-        _processPendingRewards(to, currentQuarter);
-        _afterTransfer(msg.sender, to, amount, currentQuarter);
+        _updateQuarter($, currentQuarter);
+        _processPendingRewards($, msg.sender, currentQuarter);
+        _processPendingRewards($, to, currentQuarter);
+        _afterTransfer($, msg.sender, to, amount, currentQuarter);
 
         bool success = super.transfer(to, amount);
         return success;
@@ -321,14 +330,15 @@ contract MortarStaking is
         nonReentrant
         returns (bool)
     {
-        (uint256 currentQuarter,,) = getCurrentQuarter();
+        StakingStorage storage $ = _getStakingStorage();
+        (uint256 currentQuarter,,) = _getCurrentQuarter($);
 
-        _updateQuarter(currentQuarter);
-        _processPendingRewards(from, currentQuarter);
-        _processPendingRewards(to, currentQuarter);
+        _updateQuarter($, currentQuarter);
+        _processPendingRewards($, from, currentQuarter);
+        _processPendingRewards($, to, currentQuarter);
 
         bool success = super.transferFrom(from, to, amount);
-        _afterTransfer(from, to, amount, currentQuarter);
+        _afterTransfer($, from, to, amount, currentQuarter);
 
         return success;
     }
@@ -336,9 +346,17 @@ contract MortarStaking is
     /**
      * @notice Handles post-deposit or mint actions.
      */
-    function _afterDepositOrMint(uint256 assets, uint256 shares, address receiver, uint256 currentQuarter) private {
-        UserInfo storage _userInfo = userQuarterInfo[receiver][currentQuarter];
-        Quarter storage _quarter = quarters[currentQuarter];
+    function _afterDepositOrMint(
+        StakingStorage storage $,
+        uint256 assets,
+        uint256 shares,
+        address receiver,
+        uint256 currentQuarter
+    )
+        private
+    {
+        UserInfo storage _userInfo = $.userQuarterInfo[receiver][currentQuarter];
+        Quarter storage _quarter = $.quarters[currentQuarter];
 
         _userInfo.shares += shares;
         _userInfo.rewardDebt = Math.mulDiv(_userInfo.shares, _quarter.accRewardPerShare, PRECISION);
@@ -351,9 +369,17 @@ contract MortarStaking is
     /**
      * @notice Handles post-withdraw or redeem actions.
      */
-    function _afterWithdrawOrRedeem(uint256 assets, uint256 shares, address owner, uint256 currentQuarter) private {
-        UserInfo storage _userInfo = userQuarterInfo[owner][currentQuarter];
-        Quarter storage _quarter = quarters[currentQuarter];
+    function _afterWithdrawOrRedeem(
+        StakingStorage storage $,
+        uint256 assets,
+        uint256 shares,
+        address owner,
+        uint256 currentQuarter
+    )
+        private
+    {
+        UserInfo storage _userInfo = $.userQuarterInfo[owner][currentQuarter];
+        Quarter storage _quarter = $.quarters[currentQuarter];
 
         _userInfo.shares -= shares;
         _userInfo.rewardDebt = Math.mulDiv(_userInfo.shares, _quarter.accRewardPerShare, PRECISION);
@@ -366,39 +392,47 @@ contract MortarStaking is
     /**
      * @dev Handles post-transfer actions.
      */
-    function _afterTransfer(address from, address to, uint256 amount, uint256 currentQuarter) internal {
+    function _afterTransfer(
+        StakingStorage storage $,
+        address from,
+        address to,
+        uint256 amount,
+        uint256 currentQuarter
+    )
+        internal
+    {
         // If all quarters are processed already then don't update the user data
         /// @dev We check only for `from` because, in the transfer function, the `to` would also be updated if `from` is
         /// updated till the current quarter
-        if (userLastProcessedQuarter[from] == 80) return;
+        if ($.userLastProcessedQuarter[from] == 80) return;
 
-        Quarter storage _quarter = quarters[currentQuarter];
+        Quarter storage _quarter = $.quarters[currentQuarter];
 
-        UserInfo storage senderInfo = userQuarterInfo[from][currentQuarter];
+        UserInfo storage senderInfo = $.userQuarterInfo[from][currentQuarter];
         senderInfo.shares -= amount;
         senderInfo.rewardDebt = Math.mulDiv(senderInfo.shares, _quarter.accRewardPerShare, PRECISION);
         senderInfo.lastUpdateTimestamp = block.timestamp;
 
-        UserInfo storage recipientInfo = userQuarterInfo[to][currentQuarter];
+        UserInfo storage recipientInfo = $.userQuarterInfo[to][currentQuarter];
         recipientInfo.shares += amount;
         recipientInfo.rewardDebt = Math.mulDiv(recipientInfo.shares, _quarter.accRewardPerShare, PRECISION);
         recipientInfo.lastUpdateTimestamp = block.timestamp;
     }
 
-    function _updateQuarter(uint256 currentQuarterIndex) internal {
+    function _updateQuarter(StakingStorage storage $, uint256 currentQuarterIndex) internal {
         // If all quarters are already processed, return
-        if (lastProcessedQuarter == 80) return;
-        Quarter storage _quarter = quarters[currentQuarterIndex];
+        if ($.lastProcessedQuarter == 80) return;
+        Quarter storage _quarter = $.quarters[currentQuarterIndex];
 
         // Step 1: Process previous quarters if any that are unprocessed and update the current quarter with the
         // updated data
-        for (uint256 i = lastProcessedQuarter; i < currentQuarterIndex;) {
-            Quarter storage pastQuarter = quarters[i];
-            uint256 quarterEndTime = quarterTimestamps[i + 1];
+        for (uint256 i = $.lastProcessedQuarter; i < currentQuarterIndex;) {
+            Quarter storage pastQuarter = $.quarters[i];
+            uint256 quarterEndTime = $.quarterTimestamps[i + 1];
 
             if (pastQuarter.totalShares > 0) {
                 // 1. Calculate rewards accrued since the last update to the end of the quarter
-                uint256 rewardsAccrued = calculateRewards(pastQuarter.lastUpdateTimestamp, quarterEndTime);
+                uint256 rewardsAccrued = _calculateRewards($, pastQuarter.lastUpdateTimestamp, quarterEndTime);
 
                 pastQuarter.totalRewardAccrued += rewardsAccrued;
 
@@ -411,14 +445,14 @@ contract MortarStaking is
                 pastQuarter.sharesGenerated = newShares;
                 // Mint the shares and pull reward tokens from the treasury
                 _mint(address(this), newShares);
-                SafeERC20.safeTransferFrom(IERC20(asset()), treasury, address(this), pastQuarter.totalRewardAccrued);
+                SafeERC20.safeTransferFrom(IERC20(asset()), $.treasury, address(this), pastQuarter.totalRewardAccrued);
                 // Update the next quarter's totalShares and totalStaked
-                quarters[i + 1].totalShares = pastQuarter.totalShares + newShares;
-                quarters[i + 1].totalStaked = pastQuarter.totalStaked + pastQuarter.totalRewardAccrued;
+                $.quarters[i + 1].totalShares = pastQuarter.totalShares + newShares;
+                $.quarters[i + 1].totalStaked = pastQuarter.totalStaked + pastQuarter.totalRewardAccrued;
             }
 
             pastQuarter.lastUpdateTimestamp = quarterEndTime;
-            quarters[i + 1].lastUpdateTimestamp = quarterEndTime;
+            $.quarters[i + 1].lastUpdateTimestamp = quarterEndTime;
             unchecked {
                 i++;
             }
@@ -428,25 +462,46 @@ contract MortarStaking is
         // current quarter
         // Then calculate the accRewardPerShare
         if (_quarter.totalShares > 0) {
-            uint256 rewards = calculateRewards(_quarter.lastUpdateTimestamp, block.timestamp);
+            uint256 rewards = _calculateRewards($, _quarter.lastUpdateTimestamp, block.timestamp);
             _quarter.totalRewardAccrued += rewards;
             _quarter.accRewardPerShare += Math.mulDiv(rewards, PRECISION, _quarter.totalShares);
         }
 
         // current quarter updates
-        lastProcessedQuarter = currentQuarterIndex;
+        $.lastProcessedQuarter = currentQuarterIndex;
         _quarter.lastUpdateTimestamp = block.timestamp;
     }
 
     /// @notice Gives quarter index data for the current timestamp
-    function getCurrentQuarter() public view returns (uint256 index, uint256 start, uint256 end) {
-        return getQuarter(block.timestamp);
+    function getCurrentQuarter() external view returns (uint256 index, uint256 start, uint256 end) {
+        StakingStorage storage $ = _getStakingStorage();
+        return _getCurrentQuarter($);
+    }
+
+    function _getCurrentQuarter(StakingStorage storage $)
+        internal
+        view
+        returns (uint256 index, uint256 start, uint256 end)
+    {
+        return _getQuarter($, block.timestamp);
     }
 
     /// @dev Binary search to get the quarter index, start timestamp and end timestamp
-    function getQuarter(uint256 timestamp) public view returns (uint256 index, uint256 start, uint256 end) {
+    function getQuarter(uint256 timestamp) external view returns (uint256 index, uint256 start, uint256 end) {
+        StakingStorage storage $ = _getStakingStorage();
+        return _getQuarter($, timestamp);
+    }
+
+    function _getQuarter(
+        StakingStorage storage $,
+        uint256 timestamp
+    )
+        internal
+        view
+        returns (uint256 index, uint256 start, uint256 end)
+    {
         uint256 left = 0;
-        uint256[] memory arr = quarterTimestamps;
+        uint256[] memory arr = $.quarterTimestamps;
         uint256 right = arr.length - 1;
 
         // Binary search implementation
@@ -473,23 +528,28 @@ contract MortarStaking is
     }
 
     /// @notice calculate the rewards for the given duration
-    function calculateRewards(uint256 start, uint256 end) public view returns (uint256) {
+    function calculateRewards(uint256 start, uint256 end) external view returns (uint256) {
+        StakingStorage storage $ = _getStakingStorage();
+        return _calculateRewards($, start, end);
+    }
+
+    function _calculateRewards(StakingStorage storage $, uint256 start, uint256 end) internal view returns (uint256) {
         if (start > end) return 0;
-        uint256 rewards = rewardRate * (end - start);
+        uint256 rewards = $.rewardRate * (end - start);
         return rewards;
     }
 
     // Convert the rewards to shares
-    function _processPendingRewards(address user, uint256 currentQuarter) internal {
-        uint256 lastProcessed = userLastProcessedQuarter[user];
+    function _processPendingRewards(StakingStorage storage $, address user, uint256 currentQuarter) internal {
+        uint256 lastProcessed = $.userLastProcessedQuarter[user];
         if (lastProcessed == 80) return;
 
-        uint256 userShares = userQuarterInfo[user][lastProcessed].shares;
+        uint256 userShares = $.userQuarterInfo[user][lastProcessed].shares;
         uint256 initialShares = userShares;
 
         for (uint256 i = lastProcessed; i < currentQuarter; i++) {
-            UserInfo storage userInfo = userQuarterInfo[user][i];
-            Quarter memory quarter = quarters[i];
+            UserInfo storage userInfo = $.userQuarterInfo[user][i];
+            Quarter memory quarter = $.quarters[i];
             if (userShares > 0) {
                 // Calculate the pending rewards: There is precision error of 1e-18
                 uint256 accumulatedReward = Math.mulDiv(userShares, quarter.accRewardPerShare, PRECISION);
@@ -499,11 +559,11 @@ contract MortarStaking is
                     // Convert the rewards to shares
                     uint256 newShares =
                         Math.mulDiv(userInfo.rewardAccrued, quarter.sharesGenerated, quarter.totalRewardAccrued);
-                    userQuarterInfo[user][i + 1].shares = userInfo.shares + newShares;
+                    $.userQuarterInfo[user][i + 1].shares = userInfo.shares + newShares;
                     userShares += newShares;
                 }
             }
-            uint256 endTimestamp = quarterTimestamps[i + 1];
+            uint256 endTimestamp = $.quarterTimestamps[i + 1];
             userInfo.lastUpdateTimestamp = endTimestamp;
         }
 
@@ -511,25 +571,25 @@ contract MortarStaking is
         _transfer(address(this), user, userShares - initialShares);
 
         // Update the current quarter's user data with the last updated quarter's data
-        UserInfo storage currentUserInfo = userQuarterInfo[user][currentQuarter];
+        UserInfo storage currentUserInfo = $.userQuarterInfo[user][currentQuarter];
 
         // @dev userShares = currentUserInfo.shares
         if (userShares > 0) {
-            uint256 accReward = Math.mulDiv(userShares, quarters[currentQuarter].accRewardPerShare, PRECISION);
+            uint256 accReward = Math.mulDiv(userShares, $.quarters[currentQuarter].accRewardPerShare, PRECISION);
             currentUserInfo.rewardAccrued += accReward - currentUserInfo.rewardDebt;
             currentUserInfo.rewardDebt = accReward;
         }
 
         currentUserInfo.lastUpdateTimestamp = block.timestamp;
-        userLastProcessedQuarter[user] = currentQuarter;
+        $.userLastProcessedQuarter[user] = currentQuarter;
     }
 
     /**
      * @notice Override the totalAssets to return the total assets staked in the contract
      */
     function totalAssets() public view virtual override returns (uint256) {
-        // TODO: Remove quarry assets
-        return super.totalAssets() - (lastQuaryRewards - claimedQuarryRewards);
+        StakingStorage storage $ = _getStakingStorage();
+        return super.totalAssets() - ($.lastQuaryRewards - $.claimedQuarryRewards);
     }
 
     /// @dev override _getVotingUnits to return the balance of the user
@@ -538,71 +598,108 @@ contract MortarStaking is
     }
 
     function claim(address account) external {
-        (uint256 index,,) = getCurrentQuarter();
-        _updateQuarter(index);
-        _processPendingRewards(account, index);
+        StakingStorage storage $ = _getStakingStorage();
+        (uint256 index,,) = _getCurrentQuarter($);
+        _updateQuarter($, index);
+        _processPendingRewards($, account, index);
     }
 
     function addQuarryRewards(uint256 amount) external onlyRole(QUARRY_ROLE) {
-        if (claimedQuarryRewards != lastQuaryRewards) {
+        StakingStorage storage $ = _getStakingStorage();
+        if ($.claimedQuarryRewards != $.lastQuaryRewards) {
             revert UnclaimedQuarryRewardsAssetsLeft();
         }
-        lastQuaryRewards = amount;
-        claimedQuarryRewards = 0;
-        distributionTimestamp = block.timestamp;
+        $.lastQuaryRewards = amount;
+        $.claimedQuarryRewards = 0;
+        $.distributionTimestamp = block.timestamp;
 
         SafeERC20.safeTransferFrom(IERC20(asset()), msg.sender, address(this), amount);
-        emit QuarryRewardsAdded(amount, distributionTimestamp);
+        emit QuarryRewardsAdded(amount, $.distributionTimestamp);
     }
 
     function claimQuarryRewards() external {
-        if (block.timestamp > distributionTimestamp + CLAIM_PERIOD) {
+        StakingStorage storage $ = _getStakingStorage();
+        if (block.timestamp > $.distributionTimestamp + CLAIM_PERIOD) {
             revert ClaimPeriodOver();
         }
-        if (lastQuarryClaimedTimestamp[msg.sender] >= distributionTimestamp) {
+        if ($.lastQuarryClaimedTimestamp[msg.sender] >= $.distributionTimestamp) {
             revert QuarryRewardsAlreadyClaimed();
         }
 
-        uint256 userShares = getPastVotes(msg.sender, distributionTimestamp);
-        uint256 totalShares = getPastTotalSupply(distributionTimestamp);
-        uint256 rewards = Math.mulDiv(userShares, lastQuaryRewards, totalShares);
+        uint256 userShares = getPastVotes(msg.sender, $.distributionTimestamp);
+        uint256 totalShares = getPastTotalSupply($.distributionTimestamp);
+        uint256 rewards = Math.mulDiv(userShares, $.lastQuaryRewards, totalShares);
 
         if (rewards > 0) {
             SafeERC20.safeTransfer(IERC20(asset()), msg.sender, rewards);
-            claimedQuarryRewards += rewards;
+            $.claimedQuarryRewards += rewards;
         }
-        lastQuarryClaimedTimestamp[msg.sender] = distributionTimestamp;
+        $.lastQuarryClaimedTimestamp[msg.sender] = $.distributionTimestamp;
         emit QuarryRewardsClaimedQuarryRewards(msg.sender, rewards);
     }
 
     function retrieveUnclaimedQuarryRewards() external onlyRole(DEFAULT_ADMIN_ROLE) {
-        if (block.timestamp <= distributionTimestamp + CLAIM_PERIOD) {
+        StakingStorage storage $ = _getStakingStorage();
+        if (block.timestamp <= $.distributionTimestamp + CLAIM_PERIOD) {
             revert ClaimPeriodNotOver();
         }
-        uint256 unclaimedQuarryRewards = lastQuaryRewards - claimedQuarryRewards;
-        claimedQuarryRewards = lastQuaryRewards;
+        uint256 unclaimedQuarryRewards = $.lastQuaryRewards - $.claimedQuarryRewards;
+        $.claimedQuarryRewards = $.lastQuaryRewards;
         SafeERC20.safeTransfer(IERC20(asset()), msg.sender, unclaimedQuarryRewards);
         emit UnclaimedQuarryRewardsQuarryRewardsRetrieved(unclaimedQuarryRewards);
     }
 
     function _onlyStakingPeriod() internal view {
+        StakingStorage storage $ = _getStakingStorage();
         if (
-            block.timestamp < quarterTimestamps[0] || block.timestamp >= quarterTimestamps[quarterTimestamps.length - 1]
+            block.timestamp < $.quarterTimestamps[0]
+                || block.timestamp >= $.quarterTimestamps[$.quarterTimestamps.length - 1]
         ) revert InvalidStakingPeriod();
     }
 
     /// @dev Override the clock function to return the block timestamp
     function clock() public view virtual override returns (uint48) {
-        return SafeCast.toUint48(block.timestamp);
+        return Time.timestamp();
     }
 
     /// @dev Override the clock mode to return the timestamp
     // solhint-disable-next-line func-name-mixedcase
     function CLOCK_MODE() public view virtual override returns (string memory) {
         // Check that the clock was not modified
-        if (clock() != block.timestamp) {
+        if (clock() != Time.timestamp()) {
             revert ERC6372InconsistentClock();
         }
         return "mode=timestamp";
+    }
+
+    function _getStakingStorage() internal pure returns (StakingStorage storage $) {
+        assembly {
+            $.slot := MortarStakingStorageLocation
+        }
+    }
+
+    function treasury() public view returns (address) {
+        StakingStorage storage $ = _getStakingStorage();
+        return $.treasury;
+    }
+
+    function quarterTimestamps(uint256 index) public view returns (uint256) {
+        StakingStorage storage $ = _getStakingStorage();
+        return $.quarterTimestamps[index];
+    }
+
+    function rewardRate() public view returns (uint256) {
+        StakingStorage storage $ = _getStakingStorage();
+        return $.rewardRate;
+    }
+
+    function userQuarterInfo(address user, uint256 quarter) public view returns (UserInfo memory) {
+        StakingStorage storage $ = _getStakingStorage();
+        return $.userQuarterInfo[user][quarter];
+    }
+
+    function quarters(uint256 index) public view returns (Quarter memory) {
+        StakingStorage storage $ = _getStakingStorage();
+        return $.quarters[index];
     }
 }

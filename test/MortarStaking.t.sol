@@ -654,8 +654,7 @@ contract MortarStakingTesting is Test {
         vm.prank(alice);
         staking.claim(alice);
 
-        (uint256 aliceRewardAccrued,, uint256 aliceRewardDebt, uint256 aliceShares) =
-            staking.userQuarterInfo(alice, quarterLength - 2);
+        MortarStaking.UserInfo memory aliceInfo = staking.userQuarterInfo(alice, quarterLength - 2);
         uint256 aliceShareBalance = staking.balanceOf(alice);
 
         // Run Transfer
@@ -663,7 +662,9 @@ contract MortarStakingTesting is Test {
         staking.transfer(bob, transferAmount);
 
         // Assert no state updates after staking period
-        assertUserData(alice, quarterLength - 2, aliceShares, aliceRewardAccrued, aliceRewardDebt, stakingEndTime);
+        assertUserData(
+            alice, quarterLength - 2, aliceInfo.shares, aliceInfo.rewardAccrued, aliceInfo.rewardDebt, stakingEndTime
+        );
         assertUserData(alice, quarterLength - 1, aliceShareBalance, 0, 0, stakingEndTime);
         // More assertions for Quarter and Bob's 2nd last quarter
     }
@@ -701,12 +702,11 @@ contract MortarStakingTesting is Test {
         internal
         view
     {
-        (uint256 rewardAccrued, uint256 lastUpdate, uint256 rewardDebt, uint256 shares) =
-            staking.userQuarterInfo(user, quarter);
-        assertEq(shares, expectedShares, "User shares incorrect");
-        assertApproxEqAbs(rewardAccrued, expectedRewards, 1e2, "User rewards incorrect");
-        assertApproxEqAbs(rewardDebt, expectedDebt, 1e2, "User reward debt incorrec ");
-        assertEq(lastUpdate, expectedLastUpdate, "User last update incorrect");
+        MortarStaking.UserInfo memory info = staking.userQuarterInfo(user, quarter);
+        assertEq(info.shares, expectedShares, "User shares incorrect");
+        assertApproxEqAbs(info.rewardAccrued, expectedRewards, 1e2, "User rewards incorrect");
+        assertApproxEqAbs(info.rewardDebt, expectedDebt, 1e2, "User reward debt incorrect");
+        assertEq(info.lastUpdateTimestamp, expectedLastUpdate, "User last update incorrect");
     }
 
     // Helper function to assert quarter data
@@ -720,10 +720,10 @@ contract MortarStakingTesting is Test {
         internal
         view
     {
-        (uint256 APS,,, uint256 totalShares, uint256 totalStaked, uint256 generated) = staking.quarters(quarter);
-        assertEq(APS, expectedAPS, "Accumulated reward per share incorrect");
-        assertEq(totalShares, expectedTotalShares, "Total shares incorrect");
-        assertEq(totalStaked, expectedTotalStaked, "Total staked incorrect");
-        assertEq(generated, expectedGenerated, "Generated rewards incorrect");
+        MortarStaking.Quarter memory quarterData = staking.quarters(quarter);
+        assertEq(quarterData.accRewardPerShare, expectedAPS, "Accumulated reward per share incorrect");
+        assertEq(quarterData.totalShares, expectedTotalShares, "Total shares incorrect");
+        assertEq(quarterData.totalStaked, expectedTotalStaked, "Total staked incorrect");
+        assertEq(quarterData.sharesGenerated, expectedGenerated, "Generated rewards incorrect");
     }
 }
