@@ -36,8 +36,7 @@ contract MortarStakingTesting is Test {
         stakingImplementation = new MortarStaking();
         proxyAdmin = new ProxyAdmin(address(this));
         // Encode initialization data
-        bytes memory initData =
-            abi.encodeWithSelector(MortarStaking.initialize.selector, address(token), address(this));
+        bytes memory initData = abi.encodeWithSelector(MortarStaking.initialize.selector, address(token), address(this));
         proxy = new TransparentUpgradeableProxy(address(stakingImplementation), address(proxyAdmin), initData);
         staking = MortarStaking(address(proxy));
 
@@ -551,21 +550,6 @@ contract MortarStakingTesting is Test {
         assertEq(staking.totalSupply(), newShares, "Total supply incorrect");
     }
 
-        // Alice deposits in the first quarter
-        vm.prank(alice);
-        staking.deposit(depositAmount, alice);
-
-        // Warp to the end of the first quarter
-        vm.warp(firstQuarterEndTime + 1);
-
-        // Send rewards to treasury
-        token.mint(staking.treasury(), 2_775_662_503_807_493_146_176_000);
-
-        staking.claim(alice);
-    }
-
-    function testBalanceOf() public { }
-
     function testRedeemSingleUserSingleQuarter() public { }
 
     function testRedeemSingleUserMultipleQuarters() public { }
@@ -601,7 +585,8 @@ contract MortarStakingTesting is Test {
         uint256 expectedLastUpdate,
         uint256 quarter
     )
-        internal view
+        internal
+        view
     {
         (uint256 rewardAccrued, uint256 lastUpdate, uint256 rewardDebt, uint256 shares) =
             staking.userQuarterInfo(user, quarter);
@@ -619,7 +604,8 @@ contract MortarStakingTesting is Test {
         uint256 expectedTotalStaked,
         uint256 expectedGenerated
     )
-        internal view
+        internal
+        view
     {
         (uint256 APS,,, uint256 totalShares, uint256 totalStaked, uint256 generated) = staking.quarters(quarter);
         assertEq(APS, expectedAPS, "Accumulated reward per share incorrect");
