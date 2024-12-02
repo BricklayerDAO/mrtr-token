@@ -21,7 +21,7 @@ contract MortarStakingTreasuryTest is Test {
     address public attacker;
 
     uint256 public initialTreasuryBalance = 1_000_000 * 10 ** 18; // 1 million tokens
-    
+
     event StakingContractSet(address indexed oldContract, address indexed newContract);
     event TokensWithdrawn(address indexed to, uint256 amount);
     event TokensPulled(address indexed to, uint256 amount);
@@ -52,11 +52,11 @@ contract MortarStakingTreasuryTest is Test {
     // Test onlyOwner modifier for setStakingContract
     function testSetStakingContractByOwner() public {
         address newStakingContract = address(0xABC);
-        
+
         vm.expectEmit(true, true, false, false);
         emit StakingContractSet(stakingContract, newStakingContract);
         treasury.setStakingContract(newStakingContract);
-        
+
         assertEq(treasury.stakingContract(), newStakingContract);
     }
 

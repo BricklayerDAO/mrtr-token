@@ -387,9 +387,11 @@ contract MortarStaking is
             if (pastQuarter.totalShares > 0) {
                 // 1. Calculate rewards accrued since the last update to the end of the quarter
                 uint256 rewardsAccrued = calculateRewards(pastQuarter.lastUpdateTimestamp, quarterEndTime);
+
                 pastQuarter.totalRewardAccrued += rewardsAccrued;
 
                 // 2. Calculate accRewardPerShare BEFORE updating totalShares to prevent dilution
+
                 pastQuarter.accRewardPerShare += Math.mulDiv(rewardsAccrued, PRECISION, pastQuarter.totalShares);
 
                 // 3. Convert rewards to shares and mint them
@@ -476,7 +478,6 @@ contract MortarStaking is
         for (uint256 i = lastProcessed; i < currentQuarter; i++) {
             UserInfo storage userInfo = userQuarterInfo[user][i];
             Quarter memory quarter = quarters[i];
-
             if (userShares > 0) {
                 // Calculate the pending rewards: There is precision error of 1e-18
                 uint256 accumulatedReward = Math.mulDiv(userShares, quarter.accRewardPerShare, PRECISION);
