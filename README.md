@@ -4,7 +4,7 @@ Implementation of a staking contract and token with autorestaking. Rewards are d
 
 ## Detailed breakdown
 
-### Rewards
+### Staking Rewards
 
 - Rewards are distributed quarterly over a period of 80 quarters.
 - Rewards are accrued in a time-weighted manner according to ERC4626 shares of every user.
@@ -16,6 +16,15 @@ Implementation of a staking contract and token with autorestaking. Rewards are d
   - Admin should take care of adding liquidity to this treasury regularly
     - If there is not enough liquidity once a new quarter begings transactions will start to fail
   - Admin have full control over the assets in the treasury, so they can take back any assets at any time.
+
+### Quarry Rewards
+
+- QUARRY_ROLE is used for miners to be able to deposit quarry rewards.
+- Only one quarry reward can be active at a time.
+- 30 days period for claiming.
+- Shares of the users at quarry reward deposit time are used to distribute the rewards.
+- Rewards can be deposited at any time if no other quarry reward is unclaimed
+- Default admin can retrive any unclaimed rewards which is mandatory for more quarry rewards to be deposited
 
 ### ERC4626
 
@@ -57,6 +66,8 @@ You will see the contract address in the displayed output.
 ### Verification
 
 Make sure to add the `--verify` flag if you want the contracts to be verified. You will need an Etherscan API key configured in your `foundry.toml` file or pass it as a flag to the command. Check verification docs in Foundry book for more details.
+
+### Upgrades
 
 ## Testing
 
