@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
+import "forge-std/console.sol";
 import { Test } from "forge-std/Test.sol";
 import { MortarStaking } from "../src/MortarStaking.sol";
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
@@ -227,7 +228,6 @@ contract MortarStakingTesting is Test {
         assert(staking.totalSupply() > staking.balanceOf(alice) + staking.balanceOf(bob));
     }
 
-    // TODO: Check deposit in last quarter and check values
     function testMultipleUsersMintMultipleQuarters() public {
         // Warp to the middle of the first quarter
         uint256 firstQuarterStartTime = staking.quarterTimestamps(0);
@@ -326,6 +326,37 @@ contract MortarStakingTesting is Test {
         assertUserData(alice, 0, expectedShares, expectedRewards, expectedDebt, expectedLastUpdate);
         assertEq(staking.totalSupply(), totalDeposit, "Total supply incorrect");
         assertEq(staking.totalAssets(), totalDeposit, "Total assets incorrect");
+    }
+
+    function testDepositTillLastQuarter() public {
+        uint256 aliceOriginalBalance = token.balanceOf(alice);
+        uint256 firstQuarterStartTime = staking.quarterTimestamps(0);
+        uint256 depositAmount = 1 ether;
+
+        vm.warp(firstQuarterStartTime); // Warp to valid staking period
+        vm.prank(alice);
+        staking.deposit(depositAmount, alice);
+
+        vm.warp(staking.quarterTimestamps(80)); // Warp to last quarter
+        vm.prank(alice);
+        staking.claim(alice);
+
+        uint256 aliceShares = staking.balanceOf(alice);
+
+        vm.prank(alice);
+        staking.withdraw(aliceShares, alice, alice);
+
+        MortarStaking.Quarter memory lastQuarter = staking.quarters(0);
+
+        console.log(staking.quarterTimestamps(80) - staking.quarterTimestamps(0));
+
+        // The difference comes from the precision loss of the reward rate
+        assertApproxEqAbs(
+            450_000_000 ether + aliceOriginalBalance,
+            token.balanceOf(alice),
+            1e11,
+            "Alice balance should contain all the rewards from staking"
+        );
     }
 
     function testMultipleMintsInSameQuarter() public {
@@ -708,7 +739,6 @@ contract MortarStakingTesting is Test {
         staking.redeem(50 ether, alice, alice);
     }
 
-    // TODO: Try to withdraw after the staking period is over and assert values
     function testWithdrawInDifferentQuarter() public {
         // Define the first quarter's start and end times
         uint256 firstQuarterStartTime = staking.quarterTimestamps(0);
