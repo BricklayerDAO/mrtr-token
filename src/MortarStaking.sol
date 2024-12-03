@@ -793,6 +793,24 @@ contract MortarStaking is
     }
 
     /**
+     * @dev Gets last quarry rewards.
+     * @return The last quarry rewards.
+     */
+    function lastQuaryRewards() public view returns (uint256) {
+        StakingStorage storage $ = _getStakingStorage();
+        return $.lastQuaryRewards;
+    }
+
+    /**
+     * @dev Gets the claimed quarry rewards.
+     * @return The claimed quarry rewards.
+     */
+    function claimedQuarryRewards() public view returns (uint256) {
+        StakingStorage storage $ = _getStakingStorage();
+        return $.claimedQuarryRewards;
+    }
+
+    /**
      * @dev Gets the user's quarter info.
      * @param user The address of the user.
      * @param quarter The index of the quarter.
