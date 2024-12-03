@@ -1047,7 +1047,7 @@ contract MortarStakingTesting is Test {
         staking.deposit(aliceDepositAmount, alice);
         staking.delegate(alice);
         vm.stopPrank();
-        
+
         // Bob deposits at his deposit timestamp
         vm.warp(bobDepositTimestamp);
         vm.startPrank(bob);
@@ -1084,8 +1084,96 @@ contract MortarStakingTesting is Test {
         assertEq(rewardAmount - aliceRewards, token.balanceOf(address(this)), "Quarry rewards not retrieved");
     }
 
-    function testDepositFromStartToEnd() public { } // Check if 450M rewards are distributed, match totalSupply() and
-        // balanceOf()
+    function testAddQuarryRewardsUnclaimedRewardsLeftRevert() public {
+        vm.startPrank(quarry);
+        token.approve(address(staking), 1000 ether);
+        staking.addQuarryRewards(1000 ether);
+        vm.stopPrank();
+
+        // Attempt to add quarry rewards again without claiming previous rewards
+        vm.expectRevert(MortarStaking.UnclaimedQuarryRewardsAssetsLeft.selector);
+        vm.prank(quarry);
+        staking.addQuarryRewards(500 ether);
+    }
+
+    function testClaimQuarryRewardsClaimPeriodOverRevert() public {
+        uint256 disributionTimestamp = staking.quarterTimestamps(0);
+
+        vm.warp(disributionTimestamp);
+        vm.startPrank(quarry);
+        token.approve(address(staking), 1000 ether);
+        staking.addQuarryRewards(1000 ether);
+        vm.stopPrank();
+
+        // Warp time to after the claim period
+        vm.warp(disributionTimestamp + 31 days);
+
+        vm.prank(alice);
+        staking.deposit(1000 ether, alice);
+
+        // Attempt to claim quarry rewards after claim period
+        vm.expectRevert(MortarStaking.ClaimPeriodOver.selector);
+        staking.claimQuarryRewards(alice);
+    }
+
+    function testClaimQuarryRewardsAlreadyClaimedRevert() public {
+        uint256 disributionTimestamp = staking.quarterTimestamps(0) + 1;
+        vm.warp(disributionTimestamp);
+        // Add quarry rewards
+        vm.startPrank(quarry);
+        token.approve(address(staking), 1000 ether);
+        staking.addQuarryRewards(1000 ether);
+        vm.stopPrank();
+
+        vm.prank(alice);
+        staking.deposit(1000 ether, alice);
+
+        vm.warp(disributionTimestamp + 1);
+        // Claim quarry rewards successfully
+        staking.claimQuarryRewards(alice);
+
+        // Attempt to claim again
+        vm.expectRevert(MortarStaking.QuarryRewardsAlreadyClaimed.selector);
+        staking.claimQuarryRewards(alice);
+    }
+
+    function testRetrieveUnclaimedQuarryRewardsClaimPeriodNotOverRevert() public {
+        uint256 disributionTimestamp = staking.quarterTimestamps(0) + 1;
+        vm.warp(disributionTimestamp);
+        // Add quarry rewards
+        vm.startPrank(quarry);
+        token.approve(address(staking), 1000 ether);
+        staking.addQuarryRewards(1000 ether);
+        vm.stopPrank();
+
+        // Attempt to retrieve unclaimed rewards before claim period
+        vm.expectRevert(MortarStaking.ClaimPeriodNotOver.selector);
+        staking.retrieveUnclaimedQuarryRewards();
+    }
+
+    function testClaimQuarryRewardsNoSharesNoRevert() public {
+        uint256 disributionTimestamp = staking.quarterTimestamps(0) + 1;
+        vm.warp(disributionTimestamp);
+        // Add quarry rewards
+        vm.startPrank(quarry);
+        token.approve(address(staking), 1000 ether);
+        staking.addQuarryRewards(1000 ether);
+        vm.stopPrank();
+
+        vm.prank(alice);
+        staking.deposit(1000 ether, alice);
+
+        vm.warp(disributionTimestamp + 1);
+        // Claim quarry rewards successfully
+        staking.claimQuarryRewards(alice);
+
+        uint256 bobBalanceBefore = token.balanceOf(bob);
+        vm.prank(bob);
+        staking.claimedQuarryRewards();
+        // Verify that no rewards were transferred
+        uint256 bobBalanceAfter = token.balanceOf(bob);
+        assertEq(bobBalanceBefore, bobBalanceAfter, "Bob should not have received any rewards");
+    }
 
     // ==================================== Helper Functions ===================================== //
 
