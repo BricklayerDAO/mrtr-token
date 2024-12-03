@@ -1006,7 +1006,7 @@ contract MortarStakingTesting is Test {
         vm.warp(currentTime);
 
         // Approve staking contract to spend quarry's tokens
-        vm.prank(quarry);
+        vm.startPrank(quarry);
         token.approve(address(staking), rewardAmount);
 
         // Expect the QuarryRewardsAdded event
@@ -1014,16 +1014,69 @@ contract MortarStakingTesting is Test {
         emit MortarStaking.QuarryRewardsAdded(rewardAmount, currentTime);
 
         // Call addQuarryRewards as quarry
-        vm.prank(quarry);
         staking.addQuarryRewards(rewardAmount);
+        vm.stopPrank();
 
         // Assert that lastQuaryRewards is updated
         uint256 lastQuaryRewards = staking.lastQuaryRewards();
         assertEq(lastQuaryRewards, rewardAmount, "lastQuaryRewards should be updated");
-
+        assertEq(staking.totalAssets(), 0, "totalAssets should be 0");
         // Assert that claimedQuarryRewards is 0 and none are claimed
         uint256 claimedQuarryRewards = staking.claimedQuarryRewards();
         assertEq(claimedQuarryRewards, 0, "claimedQuarryRewards should be reset");
+    }
+
+    function testClaimQuarryRewardsUsesPastVotes() public {
+        uint256 rewardAmount = 100_000 ether;
+
+        // Define the first quarter's start and end times
+        uint256 firstQuarterStartTime = staking.quarterTimestamps(0);
+        uint256 firstQuarterEndTime = staking.quarterTimestamps(1);
+
+        // Calculate deposit timestamps
+        uint256 aliceDepositTimestamp = firstQuarterStartTime + (firstQuarterEndTime - firstQuarterStartTime) / 2;
+        uint256 bobDepositTimestamp = aliceDepositTimestamp + 20; // Bob deposits shortly after Alice
+
+        // Define deposit amounts
+        uint256 aliceDepositAmount = 100 ether;
+        uint256 bobDepositAmount = 200 ether;
+
+        // Alice deposits at her deposit timestamp
+        vm.warp(aliceDepositTimestamp);
+        vm.startPrank(alice);
+        staking.deposit(aliceDepositAmount, alice);
+        staking.delegate(alice);
+        vm.stopPrank();
+        
+        // Bob deposits at his deposit timestamp
+        vm.warp(bobDepositTimestamp);
+        vm.startPrank(bob);
+        staking.deposit(bobDepositAmount, bob);
+        staking.delegate(bob);
+        vm.stopPrank();
+
+        // Approve and add quarry rewards
+        // Approve staking contract to spend quarry's tokens
+        uint256 distributionTimestamp = bobDepositTimestamp + 100;
+        vm.warp(distributionTimestamp);
+        vm.startPrank(quarry);
+        token.approve(address(staking), rewardAmount);
+        staking.addQuarryRewards(rewardAmount);
+        vm.stopPrank();
+
+        // Move ahead of the distribution timestamp, otherwise we cannot get past votes of users
+        uint256 balanceOfAliceBeforeRewards = token.balanceOf(alice);
+        vm.warp(distributionTimestamp + 1);
+        vm.prank(alice);
+        staking.claimQuarryRewards(alice);
+
+        uint256 aliceRewards = (aliceDepositAmount * rewardAmount) / (bobDepositAmount + aliceDepositAmount);
+        // Assert alice got the quarry yield
+        assertEq(
+            balanceOfAliceBeforeRewards + aliceRewards,
+            token.balanceOf(alice),
+            "Quarry rewards not transferred to Alice"
+        );
     }
 
     function testDepositFromStartToEnd() public { } // Check if 450M rewards are distributed, match totalSupply() and
