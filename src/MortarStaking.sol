@@ -235,7 +235,7 @@ contract MortarStaking is
     /**
      * @notice Mints shares by depositing the equivalent assets.
      * @param shares The amount of shares to mint.
-     * @param receiver The address that will receive the assets.
+     * @param receiver The address that will receive the shares.
      */
     function mint(uint256 shares, address receiver) public override nonReentrant onlyStakingPeriod returns (uint256) {
         if (shares == 0) revert CannotStakeZero();
@@ -348,10 +348,9 @@ contract MortarStaking is
         _updateQuarter($, currentQuarter);
         _processPendingRewards($, from, currentQuarter);
         _processPendingRewards($, to, currentQuarter);
-
-        bool success = super.transferFrom(from, to, amount);
         _afterTransfer($, from, to, amount, currentQuarter);
 
+        bool success = super.transferFrom(from, to, amount);
         return success;
     }
 
