@@ -1077,12 +1077,15 @@ contract MortarStakingTesting is Test {
             token.balanceOf(alice),
             "Quarry rewards not transferred to Alice"
         );
+
+        // Retrieve unclaimed quarry rewards
+        vm.warp(distributionTimestamp + 31 days);
+        staking.retrieveUnclaimedQuarryRewards();
+        assertEq(rewardAmount - aliceRewards, token.balanceOf(address(this)), "Quarry rewards not retrieved");
     }
 
     function testDepositFromStartToEnd() public { } // Check if 450M rewards are distributed, match totalSupply() and
         // balanceOf()
-
-    function depositAndWithdrawMultipleUserAcrossQuarters() public { }
 
     // ==================================== Helper Functions ===================================== //
 
