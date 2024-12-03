@@ -4,7 +4,8 @@ pragma solidity 0.8.26;
 import { MortarStakingTreasury } from "./MortarStakingTreasury.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { ERC4626Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
-import { VotesUpgradeable } from "@openzeppelin/contracts-upgradeable/governance/utils/VotesUpgradeable.sol";
+import { ERC20VotesUpgradeable } from
+    "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20VotesUpgradeable.sol";
 import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import { ERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
@@ -15,8 +16,8 @@ import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 
 contract MortarStaking is
     Initializable,
+    ERC20VotesUpgradeable,
     ERC4626Upgradeable,
-    VotesUpgradeable,
     ReentrancyGuardUpgradeable,
     AccessControlUpgradeable
 {
@@ -100,9 +101,9 @@ contract MortarStaking is
      * @param _admin The address of the admin.
      */
     function initialize(IERC20 _asset, address _admin) external initializer {
-        __ERC4626_init(_asset);
         __ERC20_init("XMortar", "xMRTR");
-        __Votes_init();
+        __ERC4626_init(_asset);
+        __ERC20Votes_init();
         __ReentrancyGuard_init();
         __AccessControl_init();
 
@@ -647,15 +648,6 @@ contract MortarStaking is
     }
 
     /**
-     * @dev Override the _getVotingUnits to return the balance of the user.
-     * @param account The address of the user.
-     * @return The balance of the user.
-     */
-    function _getVotingUnits(address account) internal view override returns (uint256) {
-        return balanceOf(account);
-    }
-
-    /**
      * @dev Claims the staking rewards for a user.
      * @param account The address of the user.
      */
@@ -696,12 +688,11 @@ contract MortarStaking is
             revert QuarryRewardsAlreadyClaimed();
         }
 
-        uint256 userShares = getPastVotes(msg.sender, $.distributionTimestamp);
+        uint256 userShares = getPastVotes(user, $.distributionTimestamp);
         uint256 totalShares = getPastTotalSupply($.distributionTimestamp);
         uint256 rewards = Math.mulDiv(userShares, $.lastQuaryRewards, totalShares);
-
         if (rewards > 0) {
-            SafeERC20.safeTransfer(IERC20(asset()), msg.sender, rewards);
+            SafeERC20.safeTransfer(IERC20(asset()), user, rewards);
             $.claimedQuarryRewards += rewards;
         }
         $.lastQuarryClaimedTimestamp[user] = $.distributionTimestamp;
@@ -829,5 +820,27 @@ contract MortarStaking is
     function quarters(uint256 index) public view returns (Quarter memory) {
         StakingStorage storage $ = _getStakingStorage();
         return $.quarters[index];
+    }
+
+    /**
+     * @dev Overriden for compatibility
+     */
+    function decimals() public view override(ERC20Upgradeable, ERC4626Upgradeable) returns (uint8) {
+        return super.decimals();
+    }
+
+    /**
+     * @dev Overriden for compatibility
+     */
+    function _update(
+        address from,
+        address to,
+        uint256 value
+    )
+        internal
+        virtual
+        override(ERC20Upgradeable, ERC20VotesUpgradeable)
+    {
+        super._update(from, to, value);
     }
 }
