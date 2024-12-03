@@ -83,21 +83,21 @@ contract MortarStakingTesting is Test {
         assertEq(end, 1_742_860_800, "Middle of first quarter: incorrect end");
 
         // Case 4: Middle quarter
-        vm.warp(2_050_252_800);
+        vm.warp(2_043_100_800);
         (quarter, start, end) = staking.getCurrentQuarter();
-        assertEq(quarter, 40, "Middle quarter: incorrect quarter");
-        assertEq(start, 2_050_252_800, "Middle quarter: incorrect start");
-        assertEq(end, 2_058_028_800, "Middle quarter: incorrect end");
+        assertEq(quarter, 39, "Middle quarter: incorrect quarter");
+        assertEq(start, 2_043_100_800, "Middle quarter: incorrect start");
+        assertEq(end, 2_050_617_600, "Middle quarter: incorrect end");
 
         // Case 5: Last quarter
-        vm.warp(2_358_000_001);
+        vm.warp(2_358_720_001);
         (quarter, start, end) = staking.getCurrentQuarter();
         assertEq(quarter, 79, "Last quarter: incorrect quarter");
-        assertEq(start, 2_358_000_000, "Last quarter: incorrect start");
-        assertEq(end, 2_365_420_800, "Last quarter: incorrect end");
+        assertEq(start, 2_358_720_000, "Last quarter: incorrect start");
+        assertEq(end, 2_366_236_800, "Last quarter: incorrect end");
 
         // Case 6: After staking period
-        vm.warp(2_365_420_801);
+        vm.warp(2_366_236_801);
         (quarter, start, end) = staking.getCurrentQuarter();
         assertEq(quarter, 80, "After staking period: incorrect quarter");
         assertEq(start, 0, "After staking period: incorrect start");
@@ -108,7 +108,7 @@ contract MortarStakingTesting is Test {
         (quarter, start, end) = staking.getCurrentQuarter();
         assertEq(quarter, 1, "Quarter boundary: incorrect quarter");
         assertEq(start, 1_742_860_800, "Quarter boundary: incorrect start");
-        assertEq(end, 1_748_822_400, "Quarter boundary: incorrect end");
+        assertEq(end, 1_750_723_200, "Quarter boundary: incorrect end");
     }
 
     function testMintInFirstQuarter() public {
