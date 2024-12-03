@@ -24,7 +24,6 @@ def generate_gmt_timestamps(start_year=2024, end_year=2044):
     
     return timestamps
 
-if __name__ == "__main__":
-    timestamps = generate_gmt_timestamps()
-    print(timestamps)
-    print(f"Total timestamps generated: {len(timestamps)}")
+timestamps = generate_gmt_timestamps()
+print(timestamps)
+print(f"Total timestamps generated: {len(timestamps)}")
