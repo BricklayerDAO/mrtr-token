@@ -348,8 +348,6 @@ contract MortarStakingTesting is Test {
 
         MortarStaking.Quarter memory lastQuarter = staking.quarters(0);
 
-        console.log(staking.quarterTimestamps(80) - staking.quarterTimestamps(0));
-
         // The difference comes from the precision loss of the reward rate
         assertApproxEqAbs(
             450_000_000 ether + aliceOriginalBalance,
