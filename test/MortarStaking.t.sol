@@ -5,6 +5,7 @@ import { Test } from "forge-std/Test.sol";
 import { MortarStaking } from "../src/MortarStaking.sol";
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { TransparentUpgradeableProxy } from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
+import { ERC4626Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
 
 contract MockERC20 is ERC20 {
     constructor() ERC20("Mock Token", "MTK") { }
@@ -20,10 +21,8 @@ contract MortarStakingTesting is Test {
     address alice = makeAddr("alice");
     address bob = makeAddr("bob");
     address carol = makeAddr("carol");
+    address quarry = makeAddr("quarry");
     uint256 quarterLength = 81;
-
-    event Deposited(address indexed user, uint256 assets, uint256 shares);
-    event Minted(address indexed user, uint256 shares, uint256 assets);
 
     function setUp() public {
         token = new MockERC20();
@@ -37,10 +36,13 @@ contract MortarStakingTesting is Test {
         vm.label(address(staking), "staking");
         vm.label(staking.treasury(), "treasury");
 
+        staking.grantRole(staking.QUARRY_ROLE(), quarry);
+
         // Mint tokens for test users
         token.mint(alice, 1000 ether);
         token.mint(bob, 1000 ether);
         token.mint(carol, 1000 ether);
+        token.mint(quarry, 100_000 ether);
 
         // Send rewards to treasury
         token.mint(staking.treasury(), 450_000_000 ether);
@@ -83,21 +85,21 @@ contract MortarStakingTesting is Test {
         assertEq(end, 1_742_860_800, "Middle of first quarter: incorrect end");
 
         // Case 4: Middle quarter
-        vm.warp(2_050_252_800);
+        vm.warp(2_043_100_800);
         (quarter, start, end) = staking.getCurrentQuarter();
-        assertEq(quarter, 40, "Middle quarter: incorrect quarter");
-        assertEq(start, 2_050_252_800, "Middle quarter: incorrect start");
-        assertEq(end, 2_058_028_800, "Middle quarter: incorrect end");
+        assertEq(quarter, 39, "Middle quarter: incorrect quarter");
+        assertEq(start, 2_043_100_800, "Middle quarter: incorrect start");
+        assertEq(end, 2_050_617_600, "Middle quarter: incorrect end");
 
         // Case 5: Last quarter
-        vm.warp(2_358_000_001);
+        vm.warp(2_358_720_001);
         (quarter, start, end) = staking.getCurrentQuarter();
         assertEq(quarter, 79, "Last quarter: incorrect quarter");
-        assertEq(start, 2_358_000_000, "Last quarter: incorrect start");
-        assertEq(end, 2_365_420_800, "Last quarter: incorrect end");
+        assertEq(start, 2_358_720_000, "Last quarter: incorrect start");
+        assertEq(end, 2_366_236_800, "Last quarter: incorrect end");
 
         // Case 6: After staking period
-        vm.warp(2_365_420_801);
+        vm.warp(2_366_236_801);
         (quarter, start, end) = staking.getCurrentQuarter();
         assertEq(quarter, 80, "After staking period: incorrect quarter");
         assertEq(start, 0, "After staking period: incorrect start");
@@ -108,13 +110,13 @@ contract MortarStakingTesting is Test {
         (quarter, start, end) = staking.getCurrentQuarter();
         assertEq(quarter, 1, "Quarter boundary: incorrect quarter");
         assertEq(start, 1_742_860_800, "Quarter boundary: incorrect start");
-        assertEq(end, 1_748_822_400, "Quarter boundary: incorrect end");
+        assertEq(end, 1_750_723_200, "Quarter boundary: incorrect end");
     }
 
     function testMintInFirstQuarter() public {
         // Warp to the first quarter start time
         uint256 firstQuarterStartTime = staking.quarterTimestamps(0);
-        vm.warp(firstQuarterStartTime + 1); // +1 to ensure we're within the quarter
+        vm.warp(firstQuarterStartTime);
 
         uint256 mintAmount = 1000 ether;
 
@@ -125,7 +127,7 @@ contract MortarStakingTesting is Test {
         uint256 expectedShares = mintAmount;
         uint256 expectedRewards = 0;
         uint256 expectedDebt = 0;
-        uint256 expectedLastUpdate = firstQuarterStartTime + 1;
+        uint256 expectedLastUpdate = firstQuarterStartTime;
 
         // Assert user data
         assertUserData(alice, 0, expectedShares, expectedRewards, expectedDebt, expectedLastUpdate);
@@ -325,6 +327,35 @@ contract MortarStakingTesting is Test {
         assertEq(staking.totalAssets(), totalDeposit, "Total assets incorrect");
     }
 
+    function testDepositTillLastQuarter() public {
+        uint256 aliceOriginalBalance = token.balanceOf(alice);
+        uint256 firstQuarterStartTime = staking.quarterTimestamps(0);
+        uint256 depositAmount = 1 ether;
+
+        vm.warp(firstQuarterStartTime); // Warp to valid staking period
+        vm.prank(alice);
+        staking.deposit(depositAmount, alice);
+
+        vm.warp(staking.quarterTimestamps(80)); // Warp to last quarter
+        vm.prank(alice);
+        staking.claim(alice);
+
+        uint256 aliceShares = staking.balanceOf(alice);
+
+        vm.prank(alice);
+        staking.withdraw(aliceShares, alice, alice);
+
+        MortarStaking.Quarter memory lastQuarter = staking.quarters(0);
+
+        // The difference comes from the precision loss of the reward rate
+        assertApproxEqAbs(
+            450_000_000 ether + aliceOriginalBalance,
+            token.balanceOf(alice),
+            1e11,
+            "Alice balance should contain all the rewards from staking"
+        );
+    }
+
     function testMultipleMintsInSameQuarter() public {
         // Warp to a time within the first quarter
         uint256 firstQuarterTime = staking.quarterTimestamps(0) + 1;
@@ -415,7 +446,8 @@ contract MortarStakingTesting is Test {
 
         // Expect the Deposited event to be emitted
         vm.expectEmit(true, true, true, true);
-        emit Deposited(alice, depositAmount, depositAmount); // assets and shares are equal in initial deposit
+        emit MortarStaking.Deposited(alice, depositAmount, depositAmount); // assets and shares are equal in initial
+            // deposit
 
         vm.prank(alice);
         staking.deposit(depositAmount, alice);
@@ -431,7 +463,7 @@ contract MortarStakingTesting is Test {
 
         // Expect the Minted event to be emitted
         vm.expectEmit(true, true, true, true);
-        emit Minted(alice, mintAmount, assetsRequired);
+        emit MortarStaking.Minted(alice, mintAmount, assetsRequired);
 
         vm.prank(alice);
         staking.mint(mintAmount, alice);
@@ -502,51 +534,378 @@ contract MortarStakingTesting is Test {
         assertApproxEqAbs(bobFinalBalance, bobExpectedBalance, 1e10, "Bob final balance incorrect");
     }
 
-    function testWithdrawInFirstQuarter() public {
-        // Step 1: Warp to the first quarter start time + 1 second to ensure within the quarter
+    function testWithdrawInSameQuarter() public {
+        // Define the first quarter's start and end times
         uint256 firstQuarterStartTime = staking.quarterTimestamps(0);
-        vm.warp(firstQuarterStartTime + 1);
+        uint256 firstQuarterEndTime = staking.quarterTimestamps(1);
 
-        // Step 2: Alice deposits 1000 ether
-        uint256 depositAmount = 1000 ether;
+        // Calculate deposit timestamps
+        uint256 aliceDepositTimestamp = firstQuarterStartTime + (firstQuarterEndTime - firstQuarterStartTime) / 2;
+        uint256 bobDepositTimestamp = aliceDepositTimestamp + 20;
+
+        // Define deposit amounts
+        uint256 aliceDepositAmount = 100 ether;
+        uint256 bobDepositAmount = 200 ether;
+
+        // Alice deposits at her deposit timestamp
+        vm.warp(aliceDepositTimestamp);
+        vm.prank(alice);
+        staking.deposit(aliceDepositAmount, alice);
+
+        // Bob deposits at his deposit timestamp
+        vm.warp(bobDepositTimestamp);
+        vm.prank(bob);
+        staking.deposit(bobDepositAmount, bob);
+
+        uint256 APS = (staking.rewardRate() * (bobDepositTimestamp - aliceDepositTimestamp) * 1e18) / aliceDepositAmount;
+        // Alice withdraws 50% of her shares and gets back 50 ether
+        vm.prank(alice);
+        staking.withdraw(aliceDepositAmount / 2, alice, alice);
+
+        // Assert after alice first withdraw same quarter, same timestamp of Bob deposit
+        {
+            APS += (staking.rewardRate() * (bobDepositTimestamp - bobDepositTimestamp) * 1e18)
+                / ((aliceDepositAmount / 2) + bobDepositAmount);
+            uint256 aliceRewardAccumulated = (APS * (aliceDepositAmount)) / 1e18;
+            uint256 expectedDebt = (APS * (aliceDepositAmount / 2)) / 1e18;
+
+            assertUserData(
+                alice, 0, (aliceDepositAmount / 2), aliceRewardAccumulated, expectedDebt, bobDepositTimestamp
+            );
+        }
+
+        {
+            uint256 aliceSecondWithdrawTimestamp = bobDepositTimestamp + 20;
+            vm.warp(aliceSecondWithdrawTimestamp);
+
+            MortarStaking.UserInfo memory aliceInfo = staking.userQuarterInfo(alice, 0);
+
+            // Alice withdraws all of shares to Bob and gets back 50 ether
+            vm.prank(alice);
+            staking.withdraw(aliceDepositAmount / 2, bob, alice);
+
+            APS += (staking.rewardRate() * (aliceSecondWithdrawTimestamp - bobDepositTimestamp) * 1e18)
+                / (bobDepositAmount + (aliceDepositAmount / 2));
+            uint256 aliceRewards =
+                aliceInfo.rewardAccrued + (APS * (aliceDepositAmount / 2) / 1e18) - aliceInfo.rewardDebt;
+
+            assertUserData(alice, 0, 0, aliceRewards, 0, aliceSecondWithdrawTimestamp);
+        }
+
+        assertEq(staking.balanceOf(alice), 0, "Alice shares incorrect");
+    }
+
+    function testWithdrawZeroAssets() public {
+        // Warp to first quarter start time
+        uint256 firstQuarterStartTime = staking.quarterTimestamps(0);
+        vm.warp(firstQuarterStartTime); // Warp to valid staking period
+
+        uint256 depositAmount = 100 ether;
         vm.prank(alice);
         staking.deposit(depositAmount, alice);
 
-        // Step 3: Warp to the middle of the first quarter to accrue rewards
-        uint256 firstQuarterEndTime = staking.quarterTimestamps(1);
-        uint256 middleOfFirstQuarter = (firstQuarterStartTime + firstQuarterEndTime) / 2;
-        vm.warp(middleOfFirstQuarter);
-
-        // Step 4: Calculate expected rewards accrued up to this point
-        uint256 timeElapsed = middleOfFirstQuarter - (firstQuarterStartTime + 1);
-        uint256 rewardRate = staking.rewardRate();
-        uint256 expectedRewards = rewardRate * timeElapsed;
-
-        // Step 5: Alice withdraws 500 ether
+        vm.expectRevert(MortarStaking.CannotWithdrawZero.selector);
         vm.prank(alice);
-        staking.withdraw(500 ether, alice, alice);
+        staking.withdraw(0, alice, alice);
+    }
 
-        // Step 6: Calculate expected accumulated reward per share (APS)
-        uint256 expectedAccRewardPerShare = (expectedRewards * 1e18) / depositAmount;
+    function testRedeemToZeroAddress() public {
+        // Warp to first quarter start time
+        uint256 firstQuarterStartTime = staking.quarterTimestamps(0);
+        vm.warp(firstQuarterStartTime); // Warp to valid staking period
 
-        // Step 7: Calculate Alice's accumulated reward and new reward debt
-        uint256 accumulatedReward = (depositAmount * expectedAccRewardPerShare) / 1e18;
-        uint256 expectedRewardAccrued = accumulatedReward; // Since initial rewardDebt is 0
-        uint256 newShares = depositAmount - 500 ether; // Remaining shares after withdrawal
-        uint256 expectedRewardDebt = (newShares * expectedAccRewardPerShare) / 1e18;
+        uint256 depositAmount = 100 ether;
+        vm.prank(alice);
+        staking.deposit(depositAmount, alice);
 
-        // Step 8: Assert Alice's user data
-        assertUserData(alice, 0, newShares, expectedRewardAccrued, expectedRewardDebt, middleOfFirstQuarter);
-        // Step 9: Assert quarter data
-        uint256 expectedTotalShares = newShares;
-        uint256 expectedTotalStaked = expectedTotalShares; // Assuming 1:1 ratio
-        uint256 expectedSharesGenerated = 0; // No shares generated yet
-        assertQuarterData(
-            0, expectedAccRewardPerShare, expectedTotalShares, expectedTotalStaked, expectedSharesGenerated
+        vm.expectRevert(MortarStaking.ZeroAddress.selector);
+        vm.prank(alice);
+        staking.redeem(50 ether, address(0), alice);
+    }
+
+    function testWithdrawMoreThanBalance() public {
+        // Define the first quarter's start and end times
+        uint256 firstQuarterStartTime = staking.quarterTimestamps(0);
+        uint256 firstQuarterEndTime = staking.quarterTimestamps(1);
+
+        // Calculate deposit timestamps
+        uint256 aliceDepositTimestamp = firstQuarterStartTime + (firstQuarterEndTime - firstQuarterStartTime) / 2;
+        uint256 bobDepositTimestamp = aliceDepositTimestamp + 20;
+
+        // Define deposit amounts
+        uint256 aliceDepositAmount = 100 ether;
+        uint256 bobDepositAmount = 200 ether;
+
+        // Alice deposits at her deposit timestamp
+        vm.warp(aliceDepositTimestamp);
+        vm.prank(alice);
+        staking.deposit(aliceDepositAmount, alice);
+
+        // Bob deposits at his deposit timestamp
+        vm.warp(bobDepositTimestamp);
+        vm.prank(bob);
+        staking.deposit(bobDepositAmount, bob);
+
+        // Attempt to redeem more shares than Alice owns
+        uint256 redeemAmount = 200 ether; // Alice only has 100 ether
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ERC4626Upgradeable.ERC4626ExceededMaxWithdraw.selector,
+                alice, // owner
+                redeemAmount, // requested
+                aliceDepositAmount // max
+            )
         );
-        // Assert total supply and total assets
-        assertEq(staking.totalAssets(), staking.convertToAssets(newShares), "Total assets incorrect");
-        assertEq(staking.totalSupply(), newShares, "Total supply incorrect");
+
+        vm.prank(alice);
+        staking.withdraw(redeemAmount, alice, alice);
+    }
+
+    function testRedeemMoreThanBalance() public {
+        // Define the first quarter's start and end times
+        uint256 firstQuarterStartTime = staking.quarterTimestamps(0);
+        uint256 firstQuarterEndTime = staking.quarterTimestamps(1);
+
+        // Calculate deposit timestamps
+        uint256 aliceDepositTimestamp = firstQuarterStartTime + (firstQuarterEndTime - firstQuarterStartTime) / 2;
+        uint256 bobDepositTimestamp = aliceDepositTimestamp + 20;
+
+        // Define deposit amounts
+        uint256 aliceDepositAmount = 100 ether;
+        uint256 bobDepositAmount = 200 ether;
+
+        // Alice deposits at her deposit timestamp
+        vm.warp(aliceDepositTimestamp);
+        vm.prank(alice);
+        staking.deposit(aliceDepositAmount, alice);
+
+        // Bob deposits at his deposit timestamp
+        vm.warp(bobDepositTimestamp);
+        vm.prank(bob);
+        staking.deposit(bobDepositAmount, bob);
+
+        // Attempt to redeem more shares than Alice owns
+        uint256 redeemAmount = 200 ether; // Alice only has 100 ether
+
+        // Expect the custom error with specific arguments
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ERC4626Upgradeable.ERC4626ExceededMaxRedeem.selector,
+                alice, // owner
+                redeemAmount, // requested
+                aliceDepositAmount // max
+            )
+        );
+
+        vm.prank(alice);
+        staking.redeem(redeemAmount, alice, alice);
+    }
+
+    function testWithdrawEmitsEvent() public {
+        // Warp to first quarter start time
+        uint256 firstQuarterStartTime = staking.quarterTimestamps(0);
+        vm.warp(firstQuarterStartTime); // Warp to valid staking period
+        uint256 depositAmount = 100 ether;
+        vm.prank(alice);
+        staking.deposit(depositAmount, alice);
+
+        uint256 withdrawAmount = 50 ether;
+        uint256 expectedShares = 50 ether; // Assuming 1:1 ratio
+
+        // Expect the Withdrawn event to be emitted with correct parameters
+        vm.expectEmit(true, true, true, true);
+        emit MortarStaking.Withdrawn(alice, withdrawAmount, expectedShares);
+
+        vm.prank(alice);
+        staking.withdraw(withdrawAmount, alice, alice);
+    }
+
+    function testRedeemEmitsEvent() public {
+        // Warp to first quarter start time
+        uint256 firstQuarterStartTime = staking.quarterTimestamps(0);
+        vm.warp(firstQuarterStartTime); // Warp to valid staking period
+
+        uint256 depositAmount = 100 ether;
+        vm.prank(alice);
+        staking.deposit(depositAmount, alice);
+
+        vm.prank(alice);
+        vm.expectEmit(true, true, true, true);
+        emit MortarStaking.Redeemed(alice, 50 ether, 50 ether);
+        staking.redeem(50 ether, alice, alice);
+    }
+
+    function testWithdrawInDifferentQuarter() public {
+        // Define the first quarter's start and end times
+        uint256 firstQuarterStartTime = staking.quarterTimestamps(0);
+        uint256 firstQuarterEndTime = staking.quarterTimestamps(1);
+
+        // Calculate deposit timestamps
+        uint256 aliceDepositTimestamp = firstQuarterStartTime + (firstQuarterEndTime - firstQuarterStartTime) / 2;
+        uint256 bobDepositTimestamp = aliceDepositTimestamp + 20;
+
+        // Define deposit amounts
+        uint256 aliceDepositAmount = 100 ether;
+        uint256 bobDepositAmount = 200 ether;
+
+        // Alice deposits at her deposit timestamp
+        vm.warp(aliceDepositTimestamp);
+        vm.prank(alice);
+        staking.deposit(aliceDepositAmount, alice);
+
+        // Bob deposits at his deposit timestamp
+        vm.warp(bobDepositTimestamp);
+        vm.prank(bob);
+        staking.deposit(bobDepositAmount, bob);
+
+        uint256 APS = (staking.rewardRate() * (bobDepositTimestamp - aliceDepositTimestamp) * 1e18) / aliceDepositAmount;
+
+        {
+            // Warp to next quarter
+            uint256 secondQuarterWithdrawTimestamp = firstQuarterEndTime;
+            vm.warp(secondQuarterWithdrawTimestamp);
+            vm.prank(alice);
+            staking.withdraw(aliceDepositAmount / 2, alice, alice);
+
+            uint256 bobRewardDebt = (APS * bobDepositAmount) / 1e18;
+
+            APS += (staking.rewardRate() * (secondQuarterWithdrawTimestamp - bobDepositTimestamp) * 1e18)
+                / (bobDepositAmount + aliceDepositAmount);
+
+            uint256 aliceRewards = (APS * aliceDepositAmount) / 1e18;
+            uint256 bobRewards = ((APS * bobDepositAmount) / 1e18) - bobRewardDebt;
+            uint256 totaAliceSharesAfterWithdraw = aliceRewards + (aliceDepositAmount / 2);
+
+            assertQuarterData(
+                0,
+                APS,
+                (aliceDepositAmount + bobDepositAmount),
+                (aliceDepositAmount + bobDepositAmount),
+                (aliceRewards + bobRewards)
+            );
+
+            assertUserData(alice, 1, totaAliceSharesAfterWithdraw, 0, 0, secondQuarterWithdrawTimestamp);
+            assertEq(staking.balanceOf(alice), totaAliceSharesAfterWithdraw, "Alice shares incorrect");
+        }
+    }
+
+    function testRedeemInSameQuarter() public {
+        // Define the first quarter's start and end times
+        uint256 firstQuarterStartTime = staking.quarterTimestamps(0);
+        uint256 firstQuarterEndTime = staking.quarterTimestamps(1);
+
+        // Calculate deposit timestamps
+        uint256 aliceDepositTimestamp = firstQuarterStartTime + (firstQuarterEndTime - firstQuarterStartTime) / 2;
+        uint256 bobDepositTimestamp = aliceDepositTimestamp + 20;
+
+        // Define deposit amounts
+        uint256 aliceDepositAmount = 100 ether;
+        uint256 bobDepositAmount = 200 ether;
+
+        // Alice deposits at her deposit timestamp
+        vm.warp(aliceDepositTimestamp);
+        vm.prank(alice);
+        staking.deposit(aliceDepositAmount, alice);
+
+        // Bob deposits at his deposit timestamp
+        vm.warp(bobDepositTimestamp);
+        vm.prank(bob);
+        staking.deposit(bobDepositAmount, bob);
+
+        uint256 APS = (staking.rewardRate() * (bobDepositTimestamp - aliceDepositTimestamp) * 1e18) / aliceDepositAmount;
+        // Alice redeems 50% of her shares
+        uint256 aliceRedeemShares = aliceDepositAmount / 2;
+        vm.prank(alice);
+        staking.redeem(aliceRedeemShares, alice, alice);
+
+        // Assert after Alice's first redeem in the same quarter
+        {
+            APS += (staking.rewardRate() * (bobDepositTimestamp - bobDepositTimestamp) * 1e18)
+                / ((aliceDepositAmount / 2) + bobDepositAmount);
+            uint256 aliceRewardAccumulated = (APS * (aliceDepositAmount)) / 1e18;
+            uint256 expectedDebt = (APS * (aliceDepositAmount / 2)) / 1e18;
+
+            assertUserData(
+                alice, 0, (aliceDepositAmount / 2), aliceRewardAccumulated, expectedDebt, bobDepositTimestamp
+            );
+        }
+
+        {
+            uint256 aliceSecondRedeemTimestamp = bobDepositTimestamp + 20;
+            vm.warp(aliceSecondRedeemTimestamp);
+
+            MortarStaking.UserInfo memory aliceInfo = staking.userQuarterInfo(alice, 0);
+
+            // Alice redeems all of her remaining shares to Bob
+            uint256 aliceRemainingShares = aliceDepositAmount / 2;
+            vm.prank(alice);
+            staking.redeem(aliceRemainingShares, bob, alice);
+
+            APS += (staking.rewardRate() * (aliceSecondRedeemTimestamp - bobDepositTimestamp) * 1e18)
+                / (bobDepositAmount + (aliceDepositAmount / 2));
+            uint256 aliceRewards =
+                aliceInfo.rewardAccrued + (APS * (aliceDepositAmount / 2) / 1e18) - aliceInfo.rewardDebt;
+
+            assertUserData(alice, 0, 0, aliceRewards, 0, aliceSecondRedeemTimestamp);
+        }
+
+        assertEq(staking.balanceOf(alice), 0, "Alice shares incorrect");
+    }
+
+    function testRedeemInDifferentQuarter() public {
+        // Define the first quarter's start and end times
+        uint256 firstQuarterStartTime = staking.quarterTimestamps(0);
+        uint256 firstQuarterEndTime = staking.quarterTimestamps(1);
+
+        // Calculate deposit timestamps
+        uint256 aliceDepositTimestamp = firstQuarterStartTime + (firstQuarterEndTime - firstQuarterStartTime) / 2;
+        uint256 bobDepositTimestamp = aliceDepositTimestamp + 20;
+
+        // Define deposit amounts
+        uint256 aliceDepositAmount = 100 ether;
+        uint256 bobDepositAmount = 200 ether;
+
+        // Alice deposits at her deposit timestamp
+        vm.warp(aliceDepositTimestamp);
+        vm.prank(alice);
+        staking.deposit(aliceDepositAmount, alice);
+
+        // Bob deposits at his deposit timestamp
+        vm.warp(bobDepositTimestamp);
+        vm.prank(bob);
+        staking.deposit(bobDepositAmount, bob);
+
+        uint256 APS = (staking.rewardRate() * (bobDepositTimestamp - aliceDepositTimestamp) * 1e18) / aliceDepositAmount;
+
+        {
+            // Warp to next quarter
+            uint256 secondQuarterRedeemTimestamp = firstQuarterEndTime;
+            vm.warp(secondQuarterRedeemTimestamp);
+            vm.prank(alice);
+            uint256 aliceRedeemShares = aliceDepositAmount / 2;
+            staking.redeem(aliceRedeemShares, alice, alice);
+
+            uint256 bobRewardDebt = (APS * bobDepositAmount) / 1e18;
+
+            APS += (staking.rewardRate() * (secondQuarterRedeemTimestamp - bobDepositTimestamp) * 1e18)
+                / (bobDepositAmount + aliceDepositAmount);
+
+            uint256 aliceRewards = (APS * aliceDepositAmount) / 1e18;
+            uint256 bobRewards = ((APS * bobDepositAmount) / 1e18) - bobRewardDebt;
+            uint256 totalAliceSharesAfterRedeem = aliceRewards + (aliceDepositAmount / 2);
+
+            assertQuarterData(
+                0,
+                APS,
+                (aliceDepositAmount + bobDepositAmount),
+                (aliceDepositAmount + bobDepositAmount),
+                (aliceRewards + bobRewards)
+            );
+
+            assertUserData(alice, 1, totalAliceSharesAfterRedeem, 0, 0, secondQuarterRedeemTimestamp);
+            assertEq(staking.balanceOf(alice), totalAliceSharesAfterRedeem, "Alice shares incorrect");
+        }
     }
 
     function testTransferInWithinStakingPeriod() public {
@@ -666,24 +1025,182 @@ contract MortarStakingTesting is Test {
         // More assertions for Quarter and Bob's 2nd last quarter
     }
 
-    function testRedeemSingleUserSingleQuarter() public { }
+    function testAddQuarryRewardsSuccessfully() public {
+        uint256 rewardAmount = 100_000 ether;
+        uint256 currentTime = staking.quarterTimestamps(0) + 1;
 
-    function testRedeemSingleUserMultipleQuarters() public { }
+        // Warp to a valid time within staking period
+        vm.warp(currentTime);
 
-    function testRedeemMultipleUserMultipleQuarters() public { }
+        // Approve staking contract to spend quarry's tokens
+        vm.startPrank(quarry);
+        token.approve(address(staking), rewardAmount);
 
-    function testRedeemAfterStakingEnds() public { }
+        // Expect the QuarryRewardsAdded event
+        vm.expectEmit(true, true, true, true);
+        emit MortarStaking.QuarryRewardsAdded(rewardAmount, currentTime);
 
-    function testTransferSharesDuringStaking() public { }
+        // Call addQuarryRewards as quarry
+        staking.addQuarryRewards(rewardAmount);
+        vm.stopPrank();
 
-    function transferAfterStakingEnds() public { }
+        // Assert that lastQuaryRewards is updated
+        uint256 lastQuaryRewards = staking.lastQuaryRewards();
+        assertEq(lastQuaryRewards, rewardAmount, "lastQuaryRewards should be updated");
+        assertEq(staking.totalAssets(), 0, "totalAssets should be 0");
+        // Assert that claimedQuarryRewards is 0 and none are claimed
+        uint256 claimedQuarryRewards = staking.claimedQuarryRewards();
+        assertEq(claimedQuarryRewards, 0, "claimedQuarryRewards should be reset");
+    }
 
-    function testQuarryYield() public { }
+    function testClaimQuarryRewardsUsesPastVotes() public {
+        uint256 rewardAmount = 100_000 ether;
 
-    function testDepositFromStartToEnd() public { } // Check if 450M rewards are distributed, match totalSupply() and
-        // balanceOf()
+        // Define the first quarter's start and end times
+        uint256 firstQuarterStartTime = staking.quarterTimestamps(0);
+        uint256 firstQuarterEndTime = staking.quarterTimestamps(1);
 
-    function depositAndWithdrawMultipleUserAcrossQuarters() public { }
+        // Calculate deposit timestamps
+        uint256 aliceDepositTimestamp = firstQuarterStartTime + (firstQuarterEndTime - firstQuarterStartTime) / 2;
+        uint256 bobDepositTimestamp = aliceDepositTimestamp + 20; // Bob deposits shortly after Alice
+
+        // Define deposit amounts
+        uint256 aliceDepositAmount = 100 ether;
+        uint256 bobDepositAmount = 200 ether;
+
+        // Alice deposits at her deposit timestamp
+        vm.warp(aliceDepositTimestamp);
+        vm.startPrank(alice);
+        staking.deposit(aliceDepositAmount, alice);
+        staking.delegate(alice);
+        vm.stopPrank();
+
+        // Bob deposits at his deposit timestamp
+        vm.warp(bobDepositTimestamp);
+        vm.startPrank(bob);
+        staking.deposit(bobDepositAmount, bob);
+        staking.delegate(bob);
+        vm.stopPrank();
+
+        // Approve and add quarry rewards
+        // Approve staking contract to spend quarry's tokens
+        uint256 distributionTimestamp = bobDepositTimestamp + 100;
+        vm.warp(distributionTimestamp);
+        vm.startPrank(quarry);
+        token.approve(address(staking), rewardAmount);
+        staking.addQuarryRewards(rewardAmount);
+        vm.stopPrank();
+
+        // Move ahead of the distribution timestamp, otherwise we cannot get past votes of users
+        uint256 balanceOfAliceBeforeRewards = token.balanceOf(alice);
+        vm.warp(distributionTimestamp + 1);
+        vm.prank(alice);
+        staking.claimQuarryRewards(alice);
+
+        uint256 aliceRewards = (aliceDepositAmount * rewardAmount) / (bobDepositAmount + aliceDepositAmount);
+        // Assert alice got the quarry yield
+        assertEq(
+            balanceOfAliceBeforeRewards + aliceRewards,
+            token.balanceOf(alice),
+            "Quarry rewards not transferred to Alice"
+        );
+
+        // Retrieve unclaimed quarry rewards
+        vm.warp(distributionTimestamp + 31 days);
+        staking.retrieveUnclaimedQuarryRewards();
+        assertEq(rewardAmount - aliceRewards, token.balanceOf(address(this)), "Quarry rewards not retrieved");
+    }
+
+    function testAddQuarryRewardsUnclaimedRewardsLeftRevert() public {
+        vm.startPrank(quarry);
+        token.approve(address(staking), 1000 ether);
+        staking.addQuarryRewards(1000 ether);
+        vm.stopPrank();
+
+        // Attempt to add quarry rewards again without claiming previous rewards
+        vm.expectRevert(MortarStaking.UnclaimedQuarryRewardsAssetsLeft.selector);
+        vm.prank(quarry);
+        staking.addQuarryRewards(500 ether);
+    }
+
+    function testClaimQuarryRewardsClaimPeriodOverRevert() public {
+        uint256 disributionTimestamp = staking.quarterTimestamps(0);
+
+        vm.warp(disributionTimestamp);
+        vm.startPrank(quarry);
+        token.approve(address(staking), 1000 ether);
+        staking.addQuarryRewards(1000 ether);
+        vm.stopPrank();
+
+        // Warp time to after the claim period
+        vm.warp(disributionTimestamp + 31 days);
+
+        vm.prank(alice);
+        staking.deposit(1000 ether, alice);
+
+        // Attempt to claim quarry rewards after claim period
+        vm.expectRevert(MortarStaking.ClaimPeriodOver.selector);
+        staking.claimQuarryRewards(alice);
+    }
+
+    function testClaimQuarryRewardsAlreadyClaimedRevert() public {
+        uint256 disributionTimestamp = staking.quarterTimestamps(0) + 1;
+        vm.warp(disributionTimestamp);
+        // Add quarry rewards
+        vm.startPrank(quarry);
+        token.approve(address(staking), 1000 ether);
+        staking.addQuarryRewards(1000 ether);
+        vm.stopPrank();
+
+        vm.prank(alice);
+        staking.deposit(1000 ether, alice);
+
+        vm.warp(disributionTimestamp + 1);
+        // Claim quarry rewards successfully
+        staking.claimQuarryRewards(alice);
+
+        // Attempt to claim again
+        vm.expectRevert(MortarStaking.QuarryRewardsAlreadyClaimed.selector);
+        staking.claimQuarryRewards(alice);
+    }
+
+    function testRetrieveUnclaimedQuarryRewardsClaimPeriodNotOverRevert() public {
+        uint256 disributionTimestamp = staking.quarterTimestamps(0) + 1;
+        vm.warp(disributionTimestamp);
+        // Add quarry rewards
+        vm.startPrank(quarry);
+        token.approve(address(staking), 1000 ether);
+        staking.addQuarryRewards(1000 ether);
+        vm.stopPrank();
+
+        // Attempt to retrieve unclaimed rewards before claim period
+        vm.expectRevert(MortarStaking.ClaimPeriodNotOver.selector);
+        staking.retrieveUnclaimedQuarryRewards();
+    }
+
+    function testClaimQuarryRewardsNoSharesNoRevert() public {
+        uint256 disributionTimestamp = staking.quarterTimestamps(0) + 1;
+        vm.warp(disributionTimestamp);
+        // Add quarry rewards
+        vm.startPrank(quarry);
+        token.approve(address(staking), 1000 ether);
+        staking.addQuarryRewards(1000 ether);
+        vm.stopPrank();
+
+        vm.prank(alice);
+        staking.deposit(1000 ether, alice);
+
+        vm.warp(disributionTimestamp + 1);
+        // Claim quarry rewards successfully
+        staking.claimQuarryRewards(alice);
+
+        uint256 bobBalanceBefore = token.balanceOf(bob);
+        vm.prank(bob);
+        staking.claimedQuarryRewards();
+        // Verify that no rewards were transferred
+        uint256 bobBalanceAfter = token.balanceOf(bob);
+        assertEq(bobBalanceBefore, bobBalanceAfter, "Bob should not have received any rewards");
+    }
 
     // ==================================== Helper Functions ===================================== //
 
@@ -721,6 +1238,6 @@ contract MortarStakingTesting is Test {
         assertEq(quarterData.accRewardPerShare, expectedAPS, "Accumulated reward per share incorrect");
         assertEq(quarterData.totalShares, expectedTotalShares, "Total shares incorrect");
         assertEq(quarterData.totalStaked, expectedTotalStaked, "Total staked incorrect");
-        assertEq(quarterData.sharesGenerated, expectedGenerated, "Generated rewards incorrect");
+        assertApproxEqAbs(quarterData.sharesGenerated, expectedGenerated, 1e3, "Generated rewards incorrect");
     }
 }

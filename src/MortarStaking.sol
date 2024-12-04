@@ -4,7 +4,8 @@ pragma solidity 0.8.26;
 import { MortarStakingTreasury } from "./MortarStakingTreasury.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { ERC4626Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
-import { VotesUpgradeable } from "@openzeppelin/contracts-upgradeable/governance/utils/VotesUpgradeable.sol";
+import { ERC20VotesUpgradeable } from
+    "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20VotesUpgradeable.sol";
 import { ReentrancyGuardUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import { ERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
@@ -15,8 +16,8 @@ import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 
 contract MortarStaking is
     Initializable,
+    ERC20VotesUpgradeable,
     ERC4626Upgradeable,
-    VotesUpgradeable,
     ReentrancyGuardUpgradeable,
     AccessControlUpgradeable
 {
@@ -100,9 +101,9 @@ contract MortarStaking is
      * @param _admin The address of the admin.
      */
     function initialize(IERC20 _asset, address _admin) external initializer {
-        __ERC4626_init(_asset);
         __ERC20_init("XMortar", "xMRTR");
-        __Votes_init();
+        __ERC4626_init(_asset);
+        __ERC20Votes_init();
         __ReentrancyGuard_init();
         __AccessControl_init();
 
@@ -117,85 +118,85 @@ contract MortarStaking is
         $.quarterTimestamps = [
             1_735_084_800, // Quarter 1 start
             1_742_860_800, // Quarter 1 end
-            1_748_822_400, // Quarter 2 end
-            1_759_180_800, // Quarter 3 end
-            1_766_601_600, // Quarter 4 end
-            1_774_377_600, // Quarter 5 end
-            1_782_067_200, // Quarter 6 end
-            1_790_697_600, // Quarter 7 end
-            1_798_118_400, // Quarter 8 end
-            1_805_894_400, // Quarter 9 end
-            1_813_584_000, // Quarter 10 end
-            1_822_214_400, // Quarter 11 end
-            1_829_635_200, // Quarter 12 end
-            1_837_411_200, // Quarter 13 end
-            1_845_100_800, // Quarter 14 end
-            1_853_731_200, // Quarter 15 end
-            1_861_152_000, // Quarter 16 end
-            1_868_928_000, // Quarter 17 end
-            1_876_617_600, // Quarter 18 end
-            1_885_248_000, // Quarter 19 end
-            1_892_668_800, // Quarter 20 end
-            1_900_444_800, // Quarter 21 end
-            1_908_134_400, // Quarter 22 end
-            1_916_764_800, // Quarter 23 end
-            1_924_185_600, // Quarter 24 end
-            1_931_961_600, // Quarter 25 end
-            1_939_651_200, // Quarter 26 end
-            1_948_281_600, // Quarter 27 end
-            1_955_702_400, // Quarter 28 end
-            1_963_478_400, // Quarter 29 end
-            1_971_168_000, // Quarter 30 end
-            1_979_798_400, // Quarter 31 end
-            1_987_219_200, // Quarter 32 end
-            1_994_995_200, // Quarter 33 end
-            2_002_684_800, // Quarter 34 end
-            2_011_315_200, // Quarter 35 end
-            2_018_736_000, // Quarter 36 end
-            2_026_512_000, // Quarter 37 end
-            2_034_201_600, // Quarter 38 end
-            2_042_832_000, // Quarter 39 end
-            2_050_252_800, // Quarter 40 end
-            2_058_028_800, // Quarter 41 end
-            2_065_718_400, // Quarter 42 end
-            2_074_348_800, // Quarter 43 end
-            2_081_769_600, // Quarter 44 end
-            2_089_545_600, // Quarter 45 end
-            2_097_235_200, // Quarter 46 end
-            2_105_865_600, // Quarter 47 end
-            2_113_286_400, // Quarter 48 end
-            2_121_062_400, // Quarter 49 end
-            2_128_752_000, // Quarter 50 end
-            2_137_382_400, // Quarter 51 end
-            2_144_803_200, // Quarter 52 end
-            2_152_579_200, // Quarter 53 end
-            2_160_268_800, // Quarter 54 end
-            2_168_899_200, // Quarter 55 end
-            2_176_320_000, // Quarter 56 end
-            2_184_096_000, // Quarter 57 end
-            2_191_785_600, // Quarter 58 end
-            2_200_416_000, // Quarter 59 end
-            2_207_836_800, // Quarter 60 end
-            2_215_612_800, // Quarter 61 end
-            2_223_302_400, // Quarter 62 end
-            2_231_932_800, // Quarter 63 end
-            2_239_353_600, // Quarter 64 end
-            2_247_129_600, // Quarter 65 end
-            2_254_819_200, // Quarter 66 end
-            2_263_449_600, // Quarter 67 end
-            2_270_870_400, // Quarter 68 end
-            2_278_646_400, // Quarter 69 end
-            2_286_336_000, // Quarter 70 end
-            2_294_966_400, // Quarter 71 end
-            2_302_387_200, // Quarter 72 end
-            2_310_163_200, // Quarter 73 end
-            2_317_852_800, // Quarter 74 end
-            2_326_483_200, // Quarter 75 end
-            2_333_904_000, // Quarter 76 end
-            2_341_680_000, // Quarter 77 end
-            2_349_369_600, // Quarter 78 end
-            2_358_000_000, // Quarter 79 end
-            2_365_420_800 // Quarter 80 end
+            1_750_723_200, // Quarter 2 end
+            1_759_104_000, // Quarter 3 end
+            1_766_620_800, // Quarter 4 end
+            1_774_396_800, // Quarter 5 end
+            1_782_259_200, // Quarter 6 end
+            1_790_640_000, // Quarter 7 end
+            1_798_156_800, // Quarter 8 end
+            1_805_932_800, // Quarter 9 end
+            1_813_795_200, // Quarter 10 end
+            1_822_176_000, // Quarter 11 end
+            1_829_692_800, // Quarter 12 end
+            1_837_555_200, // Quarter 13 end
+            1_845_417_600, // Quarter 14 end
+            1_853_798_400, // Quarter 15 end
+            1_861_315_200, // Quarter 16 end
+            1_869_091_200, // Quarter 17 end
+            1_876_953_600, // Quarter 18 end
+            1_885_334_400, // Quarter 19 end
+            1_892_851_200, // Quarter 20 end
+            1_900_627_200, // Quarter 21 end
+            1_908_489_600, // Quarter 22 end
+            1_916_870_400, // Quarter 23 end
+            1_924_387_200, // Quarter 24 end
+            1_932_163_200, // Quarter 25 end
+            1_940_025_600, // Quarter 26 end
+            1_948_406_400, // Quarter 27 end
+            1_955_923_200, // Quarter 28 end
+            1_963_785_600, // Quarter 29 end
+            1_971_648_000, // Quarter 30 end
+            1_980_028_800, // Quarter 31 end
+            1_987_545_600, // Quarter 32 end
+            1_995_321_600, // Quarter 33 end
+            2_003_184_000, // Quarter 34 end
+            2_011_564_800, // Quarter 35 end
+            2_019_081_600, // Quarter 36 end
+            2_026_857_600, // Quarter 37 end
+            2_034_720_000, // Quarter 38 end
+            2_043_100_800, // Quarter 39 end
+            2_050_617_600, // Quarter 40 end
+            2_058_393_600, // Quarter 41 end
+            2_066_256_000, // Quarter 42 end
+            2_074_636_800, // Quarter 43 end
+            2_082_153_600, // Quarter 44 end
+            2_090_016_000, // Quarter 45 end
+            2_097_878_400, // Quarter 46 end
+            2_106_259_200, // Quarter 47 end
+            2_113_776_000, // Quarter 48 end
+            2_121_552_000, // Quarter 49 end
+            2_129_414_400, // Quarter 50 end
+            2_137_795_200, // Quarter 51 end
+            2_145_312_000, // Quarter 52 end
+            2_153_088_000, // Quarter 53 end
+            2_160_950_400, // Quarter 54 end
+            2_169_331_200, // Quarter 55 end
+            2_176_848_000, // Quarter 56 end
+            2_184_624_000, // Quarter 57 end
+            2_192_486_400, // Quarter 58 end
+            2_200_867_200, // Quarter 59 end
+            2_208_384_000, // Quarter 60 end
+            2_216_246_400, // Quarter 61 end
+            2_224_108_800, // Quarter 62 end
+            2_232_489_600, // Quarter 63 end
+            2_240_006_400, // Quarter 64 end
+            2_247_782_400, // Quarter 65 end
+            2_255_644_800, // Quarter 66 end
+            2_264_025_600, // Quarter 67 end
+            2_271_542_400, // Quarter 68 end
+            2_279_318_400, // Quarter 69 end
+            2_287_180_800, // Quarter 70 end
+            2_295_561_600, // Quarter 71 end
+            2_303_078_400, // Quarter 72 end
+            2_310_854_400, // Quarter 73 end
+            2_318_716_800, // Quarter 74 end
+            2_327_097_600, // Quarter 75 end
+            2_334_614_400, // Quarter 76 end
+            2_342_476_800, // Quarter 77 end
+            2_350_339_200, // Quarter 78 end
+            2_358_720_000, // Quarter 79 end
+            2_366_236_800 // Quarter 80 end
         ];
         // Initialize reward rate
         uint256 totalDuration = $.quarterTimestamps[$.quarterTimestamps.length - 1] - $.quarterTimestamps[0];
@@ -235,7 +236,7 @@ contract MortarStaking is
     /**
      * @notice Mints shares by depositing the equivalent assets.
      * @param shares The amount of shares to mint.
-     * @param receiver The address that will receive the assets.
+     * @param receiver The address that will receive the shares.
      */
     function mint(uint256 shares, address receiver) public override nonReentrant onlyStakingPeriod returns (uint256) {
         if (shares == 0) revert CannotStakeZero();
@@ -348,10 +349,9 @@ contract MortarStaking is
         _updateQuarter($, currentQuarter);
         _processPendingRewards($, from, currentQuarter);
         _processPendingRewards($, to, currentQuarter);
-
-        bool success = super.transferFrom(from, to, amount);
         _afterTransfer($, from, to, amount, currentQuarter);
 
+        bool success = super.transferFrom(from, to, amount);
         return success;
     }
 
@@ -648,15 +648,6 @@ contract MortarStaking is
     }
 
     /**
-     * @dev Override the _getVotingUnits to return the balance of the user.
-     * @param account The address of the user.
-     * @return The balance of the user.
-     */
-    function _getVotingUnits(address account) internal view override returns (uint256) {
-        return balanceOf(account);
-    }
-
-    /**
      * @dev Claims the staking rewards for a user.
      * @param account The address of the user.
      */
@@ -697,12 +688,11 @@ contract MortarStaking is
             revert QuarryRewardsAlreadyClaimed();
         }
 
-        uint256 userShares = getPastVotes(msg.sender, $.distributionTimestamp);
+        uint256 userShares = getPastVotes(user, $.distributionTimestamp);
         uint256 totalShares = getPastTotalSupply($.distributionTimestamp);
         uint256 rewards = Math.mulDiv(userShares, $.lastQuaryRewards, totalShares);
-
         if (rewards > 0) {
-            SafeERC20.safeTransfer(IERC20(asset()), msg.sender, rewards);
+            SafeERC20.safeTransfer(IERC20(asset()), user, rewards);
             $.claimedQuarryRewards += rewards;
         }
         $.lastQuarryClaimedTimestamp[user] = $.distributionTimestamp;
@@ -794,6 +784,24 @@ contract MortarStaking is
     }
 
     /**
+     * @dev Gets last quarry rewards.
+     * @return The last quarry rewards.
+     */
+    function lastQuaryRewards() public view returns (uint256) {
+        StakingStorage storage $ = _getStakingStorage();
+        return $.lastQuaryRewards;
+    }
+
+    /**
+     * @dev Gets the claimed quarry rewards.
+     * @return The claimed quarry rewards.
+     */
+    function claimedQuarryRewards() public view returns (uint256) {
+        StakingStorage storage $ = _getStakingStorage();
+        return $.claimedQuarryRewards;
+    }
+
+    /**
      * @dev Gets the user's quarter info.
      * @param user The address of the user.
      * @param quarter The index of the quarter.
@@ -812,5 +820,27 @@ contract MortarStaking is
     function quarters(uint256 index) public view returns (Quarter memory) {
         StakingStorage storage $ = _getStakingStorage();
         return $.quarters[index];
+    }
+
+    /**
+     * @dev Overriden for compatibility
+     */
+    function decimals() public view override(ERC20Upgradeable, ERC4626Upgradeable) returns (uint8) {
+        return super.decimals();
+    }
+
+    /**
+     * @dev Overriden for compatibility
+     */
+    function _update(
+        address from,
+        address to,
+        uint256 value
+    )
+        internal
+        virtual
+        override(ERC20Upgradeable, ERC20VotesUpgradeable)
+    {
+        super._update(from, to, value);
     }
 }
