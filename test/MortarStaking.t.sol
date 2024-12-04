@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import "forge-std/console.sol";
 import { Test } from "forge-std/Test.sol";
 import { MortarStaking } from "../src/MortarStaking.sol";
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
